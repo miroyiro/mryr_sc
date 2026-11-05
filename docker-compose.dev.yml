@@ -1,0 +1,18 @@
+# 로컬 개발용 DB (scrap 전용). 실행: docker compose -f docker-compose.dev.yml up -d
+services:
+  db:
+    image: postgres:16
+    container_name: mryr_sc_db
+    environment:
+      POSTGRES_DB: miroyiro
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: dev
+      TZ: Asia/Seoul
+    command: postgres -c timezone=Asia/Seoul
+    ports:
+      - "5433:5432"   # be DB(5432)와 겹치지 않게 5433
+    volumes:
+      - sc_db_data:/var/lib/postgresql/data
+
+volumes:
+  sc_db_data:

@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+httpx
+sqlalchemy[asyncio]
+asyncpg
+alembic
+pydantic-settings
+apscheduler
+beautifulsoup4
+rapidfuzz
