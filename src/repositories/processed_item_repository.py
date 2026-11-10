@@ -1,11 +1,11 @@
 """processed_item DB 함수. (담당 미배정 → 명주 안) 검수 대기열 + 팝업 후보 큐."""
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models import ProcessedItem
+from src.models import ProcessedItem, RawItem, ScrapeSource
 from src.models.enums import ProcessedCategory, ProcessedStatus
 from src.repositories.base import paginate
 from src.schemas.common import PageParams
@@ -62,3 +62,44 @@ async def mark_rejected(session: AsyncSession, item_id: int, *, reviewed_by: int
                 reviewed_at=now_kst(), reject_reason=reason)
     )
     return result.rowcount == 1
+
+
+# ---------- api문서 기준 추가 (2026-11-09) ----------
+CANDIDATE_CATEGORIES = (ProcessedCategory.POPUP, ProcessedCategory.COLLABO_CAFE, ProcessedCategory.FAIR)
+
+
+async def list_review(session: AsyncSession, page: PageParams, *, status: ProcessedStatus | None,
+                      category: ProcessedCategory | None = None):
+    """검수 목록: processed_item + 원본 URL (원본과 비교해서 검수). 반환 = [(ProcessedItem, url)], total"""
+    stmt = (
+        select(ProcessedItem, RawItem.url)
+        .join(RawItem, RawItem.id == ProcessedItem.raw_item_id)
+        .order_by(ProcessedItem.created_at.desc())
+    )
+    if status is not None:
+        stmt = stmt.where(ProcessedItem.status == status)
+    if category is not None:
+        stmt = stmt.where(ProcessedItem.category == category)
+    total = await session.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
+    rows = (await session.execute(stmt.offset(page.offset).limit(page.limit))).all()
+    return rows, int(total or 0)
+
+
+async def list_candidates(session: AsyncSession, page: PageParams, *, status: ProcessedStatus | None):
+    """팝업 후보 큐 = processed_item(category in popup·collabo_cafe·fair). 반환 = [(item, raw, source_name)], total"""
+    stmt = (
+        select(ProcessedItem, RawItem, ScrapeSource.name)
+        .join(RawItem, RawItem.id == ProcessedItem.raw_item_id)
+        .join(ScrapeSource, ScrapeSource.id == RawItem.source_id)
+        .where(ProcessedItem.category.in_(CANDIDATE_CATEGORIES))
+        .order_by(RawItem.published_at.desc().nulls_last(), ProcessedItem.id.desc())
+    )
+    if status is not None:
+        stmt = stmt.where(ProcessedItem.status == status)
+    total = await session.scalar(select(func.count()).select_from(stmt.order_by(None).subquery()))
+    rows = (await session.execute(stmt.offset(page.offset).limit(page.limit))).all()
+    return rows, int(total or 0)
+
+
+async def delete(session: AsyncSession, item: ProcessedItem) -> None:
+    await session.delete(item)

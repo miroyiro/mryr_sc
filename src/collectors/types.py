@@ -28,6 +28,8 @@ class CollectResult:
 class Collector(Protocol):
     source: ScrapeSource
 
-    async def collect(self, target: ScrapeTarget | None) -> CollectResult: ...
+    async def collect(self, target: ScrapeTarget | None, params: dict[str, Any] | None = None) -> CollectResult:
+        """params = /internal/{소스}/sync 요청 body (weeks, afterdate, season …). 없으면 기본 동작."""
+        ...
 
     async def aclose(self) -> None: ...

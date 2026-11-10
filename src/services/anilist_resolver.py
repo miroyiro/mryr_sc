@@ -34,6 +34,9 @@ SEARCH_TTL = timedelta(days=7)
 class AniListApi(Protocol):
     async def search_media(self, title: str, *, per_page: int = 5) -> list[dict[str, Any]]: ...
     async def fetch_media_batch(self, anilist_ids: list[int]) -> dict[int, dict[str, Any]]: ...
+    async def fetch_season_ids(self, season: str, season_year: int) -> list[dict[str, Any]]:
+        """분기 작품의 {id, status} 목록만 (메타데이터 전체 X — bulk seed 금지)."""
+        ...
 
 
 def _get_api() -> AniListApi:
@@ -118,3 +121,14 @@ async def refresh(anilist_ids: list[int], *, force: bool = False) -> int:
             await cache_repository.put(session, SOURCE, f"media:{mid}", media, media_ttl(media))
         await session.commit()
         return len(medias)
+
+
+async def sync_season(season: str, season_year: int) -> int:
+    """POST /internal/anilist/sync — api문서: '방영 중·팔로우된 작품'만, TTL 지난 것만.
+    1) 분기 작품 id·status 만 조회 → RELEASING 만
+    2) (TODO) backend /internal/catalog/names 로 팔로우된 작품 id 를 받아 합집합
+    3) refresh() 가 TTL 지난 것만 alias 배치로 재조회 → backend upsert"""
+    medias = await _get_api().fetch_season_ids(season.upper(), season_year)
+    releasing = [m["id"] for m in medias if (m.get("status") or "").upper() == "RELEASING"]
+    return await refresh(releasing)
+

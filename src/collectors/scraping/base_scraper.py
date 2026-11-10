@@ -29,6 +29,11 @@ class RobotsDisallowed(Exception):
     pass
 
 
+class LayoutChanged(Exception):
+    """응답은 200 인데 기대한 구조(선택자)가 하나도 안 잡힘 → 사이트 개편 의심.
+    collect_service 가 받으면 target 을 broken 으로 바꿔서 관리자에게 알림 (조용히 0건 수집 방지)."""
+
+
 class _SourceGate:
     """같은 소스로 가는 요청 사이 최소 간격 보장. 동시에 여러 코루틴이 불러도 순서대로 통과."""
 
@@ -68,7 +73,7 @@ class BaseScraper(ABC):
 
     # ------------------------------------------------------------------ public
     @abstractmethod
-    async def collect(self, target: ScrapeTarget | None) -> CollectResult:
+    async def collect(self, target: ScrapeTarget | None, params: dict | None = None) -> CollectResult:
         """target 하나를 수집해서 CollectedItem 목록으로. DB 저장은 하지 않는다 (collect_service 가 함)."""
 
     async def aclose(self) -> None:
@@ -98,6 +103,12 @@ class BaseScraper(ABC):
         assert last_exc is not None
         raise last_exc
 
+    def sel(self, key: str, default: str) -> str:
+        """선택자/패턴을 코드가 아니라 scrape_source.config.selectors 에서 먼저 찾음.
+        사이트 HTML 이 바뀌면 배포 없이 PATCH /internal/pipeline/sources/{id} 로 config 만 고치면 됨.
+        예: {"selectors": {"row": "ul.board-list li", "title": "a.subject"}}"""
+        return (self.source.cfg("selectors") or {}).get(key, default)
+
     def sanitize(self, item: CollectedItem) -> CollectedItem:
         if not self.store_content:
             item.content = None
@@ -125,8 +136,11 @@ class BaseScraper(ABC):
         except httpx.HTTPError:
             log.warning("robots.txt fetch failed for %s → 보수적으로 진행 안 함", host)
             raise
-        if resp.status_code == 404:
-            return None
+        if resp.status_code in (404, 410):
+            return None  # robots.txt 없음 = 제한 없음
+        if resp.status_code >= 400:
+            # 401/403/5xx 를 '허용'으로 해석하면 안 됨 (에러 페이지 HTML 을 파싱하면 전부 허용이 됨)
+            raise RobotsDisallowed(f"{host}/robots.txt → {resp.status_code}")
         rp = RobotFileParser()
         rp.parse(resp.text.splitlines())
         return rp

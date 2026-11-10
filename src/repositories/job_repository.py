@@ -1,5 +1,5 @@
 """scrape_job / process_job DB 함수. (03 문서에 담당 미배정 → 파이프라인 api 소유자인 명주가 맡는 안)"""
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models import ProcessJob, ScrapeJob
@@ -48,11 +48,15 @@ async def claim_scrape_job(session: AsyncSession, job_id: int) -> bool:
 
 
 async def finish_scrape_job(
-    session: AsyncSession, job: ScrapeJob, *, status: ScrapeJobStatus, error_message: str | None = None
-) -> None:
-    job.status = status
-    job.finished_at = now_kst()
-    job.error_message = error_message
+    session: AsyncSession, job_id: int, *, status: ScrapeJobStatus, error_message: str | None = None
+) -> bool:
+    """running → completed/failed 도 조건부 UPDATE. 실행 중에 관리자가 cancel 했으면 덮어쓰지 않음 (False)."""
+    result = await session.execute(
+        update(ScrapeJob)
+        .where(ScrapeJob.id == job_id, ScrapeJob.status == ScrapeJobStatus.RUNNING)
+        .values(status=status, finished_at=now_kst(), error_message=error_message)
+    )
+    return result.rowcount == 1
 
 
 async def cancel_scrape_job(session: AsyncSession, job_id: int) -> bool:
@@ -82,3 +86,22 @@ async def create_process_job(session: AsyncSession, *, scrape_job_id: int | None
 
 async def get_process_job(session: AsyncSession, job_id: int) -> ProcessJob | None:
     return await session.get(ProcessJob, job_id)
+
+
+async def stats_since(session: AsyncSession, since) -> dict[str, int]:
+    """GET /internal/pipeline/stats — since 이후 생성된 잡 합계."""
+    s = (await session.execute(
+        select(
+            func.coalesce(func.sum(ScrapeJob.total_count), 0),
+            func.coalesce(func.sum(ScrapeJob.collected_count), 0),
+            func.coalesce(func.sum(ScrapeJob.duplicate_count), 0),
+        ).where(ScrapeJob.created_at >= since)
+    )).one()
+    p = (await session.execute(
+        select(
+            func.coalesce(func.sum(ProcessJob.processed_count), 0),
+            func.coalesce(func.sum(ProcessJob.failed_count), 0),
+        ).where(ProcessJob.created_at >= since)
+    )).one()
+    return {"scraped": int(s[0]), "new": int(s[1]), "duplicate": int(s[2]),
+            "processed": int(p[0]), "failed": int(p[1])}

@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models import ProcessedItem, RawItem
+from src.models import RawItem
 from src.repositories.base import paginate
 from src.schemas.common import PageParams
 
@@ -63,16 +63,19 @@ async def list_(session: AsyncSession, page: PageParams, *, source_id: int | Non
     return await paginate(session, stmt, page)
 
 
-async def list_unprocessed(session: AsyncSession, *, scrape_job_id: int | None = None,
-                           limit: int = 500) -> list[RawItem]:
-    """아직 processed_item 이 없는 raw (LEFT JOIN … IS NULL)."""
+async def list_for_job(session: AsyncSession, scrape_job_id: int, *, limit: int = 500) -> list[RawItem]:
+    """이 scrape_job 에서 새로 들어오거나(insert) 내용이 바뀐(hash 변경) raw.
+    upsert 가 두 경우 모두 raw.scrape_job_id 를 이번 잡으로 바꾸므로 이 조건 하나로 충분.
+    (예전 list_unprocessed 는 processed_item 이 이미 있으면 빠져서, 바뀐 글이 재가공되지 않았음)"""
     stmt = (
         select(RawItem)
-        .outerjoin(ProcessedItem, ProcessedItem.raw_item_id == RawItem.id)
-        .where(ProcessedItem.id.is_(None))
+        .where(RawItem.scrape_job_id == scrape_job_id)
         .order_by(RawItem.id)
         .limit(limit)
     )
-    if scrape_job_id is not None:
-        stmt = stmt.where(RawItem.scrape_job_id == scrape_job_id)
     return list((await session.scalars(stmt)).all())
+
+
+async def delete(session: AsyncSession, item: RawItem) -> None:
+    """processed_item 은 ON DELETE CASCADE 로 같이 지워짐 (scrape_error.raw_item_id 는 SET NULL)."""
+    await session.delete(item)

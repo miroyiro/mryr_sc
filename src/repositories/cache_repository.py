@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -77,3 +77,16 @@ async def purge(session: AsyncSession, *, source: str | None = None, expired_onl
         stmt = stmt.where(ApiCache.expires_at <= (before or now_kst()))
     result = await session.execute(stmt)
     return result.rowcount or 0
+
+
+async def delete_by_key(session: AsyncSession, source: str, cache_key: str) -> bool:
+    result = await session.execute(
+        sa_delete(ApiCache).where(ApiCache.source == source, ApiCache.cache_key == cache_key)
+    )
+    return (result.rowcount or 0) > 0
+
+
+async def count_expired(session: AsyncSession) -> int:
+    return int(await session.scalar(
+        select(func.count()).select_from(ApiCache).where(ApiCache.expires_at <= now_kst())
+    ) or 0)
