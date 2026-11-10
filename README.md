@@ -35,12 +35,14 @@ uvicorn src.main:app --reload
 
 ## 마이그레이션 (Alembic)
 ```bash
-alembic revision --autogenerate -m "설명"   # 모델 변경 → 마이그레이션 파일 생성
-alembic upgrade head                         # 적용
-alembic downgrade -1                         # 한 단계 되돌리기
+alembic revision -m "설명"      # 빈 revision 생성 → upgrade()/downgrade() 에 SQL 직접 작성
+alembic upgrade head            # 적용
+alembic downgrade -1            # 한 단계 되돌리기
+alembic history                 # 0001 → 0002 → 0003 ...
 ```
-- **revision은 한 사람씩, 순서대로** 만들기. 머지 전 `alembic heads`가 1개인지 확인
-- autogenerate는 `miroyiro_scrap` 스키마만 비교함 (`migrations/env.py`)
+- **revision은 한 사람(명주)이 순서대로** 만들기. 머지 전 `alembic heads`가 1개인지 확인
+- **`--autogenerate` 쓰지 않기**: 모델에 CHECK·인덱스를 다시 적지 않아서(진실의 원천 = 마이그레이션) autogenerate 가 인덱스를 지우는 revision 을 만듦
+- CHECK 값 바꿀 때 순서: 옛 CHECK DROP → 데이터 변환 UPDATE → 새 CHECK ADD (0002 참고)
 
 ## 협업 규칙
 - 커밋/PR에 Jira 키 포함: `feat: 애니메이트 컬렉터 (MIRO-12)`
