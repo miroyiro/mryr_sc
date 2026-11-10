@@ -4,7 +4,7 @@
 - name_matcher 로 artist/anime 후보 + confidence
 - processed_item upsert (uq_processed_raw: 재처리 = UPDATE, 검수 끝난 건 보존)
 - scrape_source.auto_publish = TRUE (kopis, anissia) 면 바로 publish
-- 카탈로그 보강 소스(laftel, aniplus 동시방영)는 processed_item 을 거치지 않음 → catalog_service (TODO)
+- 카탈로그 보강 소스(laftel, aniplus 동시방영)는 processed_item 을 거치지 않음 → catalog_service
 """
 import logging
 import time
@@ -12,6 +12,7 @@ import time
 from src.clients.backend_client import get_backend
 from src.config.database import SessionLocal
 from src.models.enums import ErrorJobType, ProcessJobStatus, TargetType
+from src.parsers.animate_parser import AnimateEventParser
 from src.parsers.base_parser import BaseParser
 from src.parsers.event_parser import EventParser
 from src.parsers.news_parser import NewsParser
@@ -26,7 +27,7 @@ log = logging.getLogger(__name__)
 
 # 소스 → 파서. 준현 소스(kopis/anissia/x/umj)용 파서는 같이 정해서 추가
 PARSERS: dict[str, BaseParser] = {
-    "animate": EventParser(main_category="anime"),
+    "animate": AnimateEventParser(),   # raw_data(라벨·기간·장소) 구조화된 전용 파서
     "aniplus": NewsParser(),
     "umj": NewsParser(),
     "x": EventParser(main_category="anime"),   # TODO: 아티스트 계정이면 jpop — target.artist_id 로 구분
@@ -64,7 +65,13 @@ async def run_process_for_scrape_job(scrape_job_id: int) -> int:
         target = await target_repository.get(session, sjob.target_id) if sjob.target_id else None
 
         if source.name in CATALOG_ONLY_SOURCES or (target and target.target_type == TargetType.SPA_PAGE):
-            # TODO(catalog_service): raw → backend /internal/catalog/streaming
+            from src.services.catalog_service import link_streaming
+            raws = await raw_item_repository.list_for_job(session, scrape_job_id)
+            result = await link_streaming(raws, await get_matcher())
+            pjob.total_count = len(raws)
+            pjob.processed_count = result.linked
+            pjob.failed_count = result.failed
+            pjob.error_message = result.message()   # 매칭 못 한 작품 목록 → 관리자가 별칭 추가
             pjob.status = ProcessJobStatus.COMPLETED
             pjob.finished_at = now_kst()
             await session.commit()
@@ -72,7 +79,7 @@ async def run_process_for_scrape_job(scrape_job_id: int) -> int:
 
         parser = PARSERS.get(source.name)
         matcher = await get_matcher()
-        raws = await raw_item_repository.list_unprocessed(session, scrape_job_id=scrape_job_id)
+        raws = await raw_item_repository.list_for_job(session, scrape_job_id)
         pjob.total_count = len(raws)
         to_publish: list[int] = []
 
@@ -91,9 +98,12 @@ async def run_process_for_scrape_job(scrape_job_id: int) -> int:
                     if cand:
                         setattr(parsed, f"{cand.kind}_id", cand.id)
                         parsed.confidence = round(cand.score, 2)
-                item_id = await processed_item_repository.upsert_for_raw(
-                    session, raw_item_id=raw.id, process_job_id=pjob.id, values=parsed.to_values()
-                )
+                # SAVEPOINT: 한 건이 DB 제약(CHECK 등)에 걸려도 트랜잭션 전체가 aborted 되지 않게
+                # (PostgreSQL 은 에러 난 트랜잭션에서 ROLLBACK 전까지 다음 쿼리를 전부 거부함)
+                async with session.begin_nested():
+                    item_id = await processed_item_repository.upsert_for_raw(
+                        session, raw_item_id=raw.id, process_job_id=pjob.id, values=parsed.to_values()
+                    )
                 pjob.processed_count += 1
                 if source.auto_publish:
                     to_publish.append(item_id)
