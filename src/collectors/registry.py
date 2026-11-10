@@ -14,7 +14,7 @@ _REGISTRY: dict[tuple[str, str | None], str] = {
     ("animate", None): "src.collectors.scraping.animate:AnimateEventCollector",
     ("aniplus", TargetType.SITEMAP): "src.collectors.scraping.aniplus:AniplusNewsCollector",
     ("aniplus", TargetType.SPA_PAGE): "src.collectors.scraping.aniplus_simulcast:AniplusSimulcastCollector",
-    ("laftel", None): "src.collectors.scraping.laftel:LaftelLinkCollector",
+    ("laftel", None): "src.collectors.scraping.laftel:LaftelSitemapCollector",
     # ---- 준현: api / feed (클래스 이름은 준현과 합의해서 맞추기) ----
     ("kopis", None): "src.collectors.api.kopis:KopisCollector",
     ("anissia", None): "src.collectors.api.anissia:AnissiaCollector",
