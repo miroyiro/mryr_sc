@@ -11,10 +11,11 @@
 import logging
 
 from src.collectors.registry import CollectorNotImplemented, build_collector
-from src.collectors.scraping.base_scraper import RobotsDisallowed
+from src.collectors.scraping.base_scraper import LayoutChanged, RobotsDisallowed
 from src.config.database import SessionLocal
 from src.models import ScrapeJob
 from src.models.enums import ErrorJobType, ScrapeJobStatus
+from src.services.sync_service import decode_params
 from src.repositories import error_repository, job_repository, raw_item_repository, source_repository, target_repository
 from src.utils.hashing import sha256_hex
 from src.utils.time import now_kst
@@ -35,13 +36,14 @@ async def run_scrape_job(job_id: int) -> None:
         target = await target_repository.get(session, job.target_id) if job.target_id else None
 
         collector = None
+        collected = 0
         try:
             if target is not None and not target.is_verified:
                 raise PermissionError("unverified target — is_verified 대상만 수집")
             collector = build_collector(source, target)
-            result = await collector.collect(target)
+            result = await collector.collect(target, params=decode_params(job.target))
 
-            collected = duplicate = 0
+            duplicate = 0
             for item in result.items:
                 h = sha256_hex(item.url, item.title, item.content, item.published_at)
                 r = await raw_item_repository.upsert(
@@ -61,7 +63,7 @@ async def run_scrape_job(job_id: int) -> None:
                 await target_repository.mark_crawled(
                     session, target, at=now_kst(), last_seen_external_id=result.last_seen_external_id
                 )
-            await job_repository.finish_scrape_job(session, job, status=ScrapeJobStatus.COMPLETED)
+            await job_repository.finish_scrape_job(session, job.id, status=ScrapeJobStatus.COMPLETED)
             await session.commit()
         except Exception as exc:  # noqa: BLE001 — 잡 단위로 잡아서 기록
             await session.rollback()
@@ -70,7 +72,12 @@ async def run_scrape_job(job_id: int) -> None:
             await error_repository.record(
                 session, job_type=ErrorJobType.SCRAPE, job_id=job_id, error_type=_error_type(exc), exc=exc,
             )
-            await job_repository.finish_scrape_job(session, job, status=ScrapeJobStatus.FAILED,
+            if isinstance(exc, LayoutChanged) and job.target_id:
+                # 사이트 개편 의심 → 대상 정지. 관리자가 selectors 고친 뒤 status=active 로 되돌림
+                broken = await target_repository.get(session, job.target_id)
+                if broken is not None:
+                    await target_repository.mark_broken(session, broken)
+            await job_repository.finish_scrape_job(session, job_id, status=ScrapeJobStatus.FAILED,
                                                    error_message=str(exc)[:1000])
             await session.commit()
             log.exception("scrape_job %s failed", job_id)
@@ -89,6 +96,8 @@ def _error_type(exc: Exception) -> str:
         return "collector_not_implemented"
     if isinstance(exc, RobotsDisallowed):
         return "robots_disallow"
+    if isinstance(exc, LayoutChanged):
+        return "layout_changed"
     if isinstance(exc, PermissionError):
         return "unverified_target"
     name = type(exc).__name__

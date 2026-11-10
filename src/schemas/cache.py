@@ -1,8 +1,19 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
 from src.schemas.common import ORMModel
+
+
+class CacheHealthOut(BaseModel):
+    status: Literal["ok", "degraded"]
+    store: Literal["postgres", "redis"] = "postgres"   # MVP = scrap DB 의 api_cache 테이블
+    expired_rows: int
+
+
+class CacheDeletedOut(BaseModel):
+    deleted: bool
 
 
 class CacheOut(ORMModel):
@@ -11,12 +22,7 @@ class CacheOut(ORMModel):
     cache_key: str
     cached_at: datetime
     expires_at: datetime
-    # data 는 크니까 목록에선 뺀다. 상세 조회에서만.
 
 
-class CacheDetailOut(CacheOut):
-    data: dict
-
-
-class PurgeResult(BaseModel):
+class PurgeOut(BaseModel):
     deleted: int

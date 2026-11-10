@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from src.api.deps import PageDep, SessionDep, conflict, meta, not_found
 from src.repositories import source_repository
 from src.repositories.base import apply_patch
-from src.schemas.common import ListResponse
+from src.schemas.common import DataResponse, ListResponse
 from src.schemas.source import SourceCreate, SourceOut, SourceUpdate
 
 router = APIRouter(prefix="/internal/pipeline/sources", tags=["pipeline:source"])
@@ -14,18 +14,18 @@ router = APIRouter(prefix="/internal/pipeline/sources", tags=["pipeline:source"]
 @router.get("", response_model=ListResponse[SourceOut])
 async def list_sources(session: SessionDep, page: PageDep, enabled: bool | None = Query(None)):
     items, total = await source_repository.list_(session, page, enabled=enabled)
-    return ListResponse(items=items, meta=meta(page, total))
+    return ListResponse(data=items, meta=meta(page, total))
 
 
-@router.get("/{sourceId}", response_model=SourceOut)
-async def get_source(sourceId: int, session: SessionDep):  # noqa: N803 — URL 변수 camelCase 규칙
-    source = await source_repository.get(session, sourceId)
+@router.get("/{id}", response_model=DataResponse[SourceOut])
+async def get_source(id: int, session: SessionDep):  # noqa: A002 — 문서 경로 변수 {id}
+    source = await source_repository.get(session, id)
     if source is None:
         raise not_found("source")
-    return source
+    return DataResponse(data=source)
 
 
-@router.post("", response_model=SourceOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=DataResponse[SourceOut], status_code=status.HTTP_201_CREATED)
 async def create_source(body: SourceCreate, session: SessionDep):
     try:
         source = await source_repository.create(session, **body.model_dump())
@@ -33,15 +33,16 @@ async def create_source(body: SourceCreate, session: SessionDep):
     except IntegrityError as exc:
         await session.rollback()
         raise conflict("source name already exists") from exc
-    return source
+    return DataResponse(data=source)
 
 
-@router.patch("/{sourceId}", response_model=SourceOut)
-async def update_source(sourceId: int, body: SourceUpdate, session: SessionDep):  # noqa: N803
-    source = await source_repository.get(session, sourceId)
+@router.patch("/{id}", response_model=DataResponse[SourceOut])
+async def update_source(id: int, body: SourceUpdate, session: SessionDep):  # noqa: A002 — 문서 경로 변수 {id}
+    source = await source_repository.get(session, id)
     if source is None:
         raise not_found("source")
     apply_patch(source, body.model_dump(exclude_unset=True))
     await session.commit()
+    await session.refresh(source)  # updated_at (DB 트리거) 다시 읽기
     # TODO: enabled 바뀌면 이 소스의 스케줄 reload (scheduler.loader)
-    return source
+    return DataResponse(data=source)

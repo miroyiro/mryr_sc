@@ -10,7 +10,9 @@ from fastapi import Depends, FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
-from src.api import cache, health, job, pipeline_error, processed_item, raw_item, resolve, schedule, source, target
+from src.api import (
+    cache, health, job, pipeline_error, processed_item, raw_item, resolve, schedule, source, sync, target,
+)
 from src.api.deps import require_internal_key
 from src.clients.backend_client import close_backend
 from src.config.database import engine
@@ -19,16 +21,20 @@ from src.config.settings import settings
 logging.basicConfig(level=settings.LOG_LEVEL, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("miroyiro-scrap")
 
-INTERNAL_ROUTERS = [
-    cache.router,
-    job.router,
-    pipeline_error.router,
-    processed_item.router,
-    raw_item.router,
-    resolve.router,
-    schedule.router,
-    source.router,
-    target.router,
+INTERNAL_ROUTERS = [   # 경로는 api문서(노션) 기준
+    cache.router,                       # /internal/cache
+    job.router,                         # /internal/pipeline/jobs
+    job.stats_router,                   # /internal/pipeline/stats
+    pipeline_error.router,              # /internal/pipeline/errors
+    processed_item.candidates_router,   # /internal/events/candidates
+    processed_item.review_router,       # /internal/pipeline/review
+    processed_item.router,              # /internal/pipeline/processedItems
+    raw_item.router,                    # /internal/pipeline/rawItems
+    resolve.router,                     # /internal/anilist
+    schedule.router,                    # /internal/pipeline/schedules
+    source.router,                      # /internal/pipeline/sources
+    sync.router,                        # /internal/{anissia,kopis,aniplus/*}/sync
+    target.router,                      # /internal/pipeline/targets
 ]
 
 
