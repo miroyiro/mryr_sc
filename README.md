@@ -57,7 +57,8 @@ alembic history                 # 0001 → 0002 → 0003 ...
 - CHECK 값 바꿀 때 순서: 옛 CHECK DROP → 데이터 변환 UPDATE → 새 CHECK ADD (0002 참고)
 
 ## 협업 규칙
-- 커밋/PR에 Jira 키 포함: `feat: 애니메이트 컬렉터 (MIRO-12)`
+- 작업 관리 = GitHub Projects (miroyiro org, "미로이로 개발"). 이슈 1개 = 작업 1개
+- 브랜치 `feat/12-animate`, 커밋 `feat: 요약 (#12)`, PR 본문 `Closes #12` → 머지 시 이슈 닫힘·보드 카드 Done
 - 공유 파일은 작게 자주 PR: `src/main.py`(라우터 **한 줄씩** 추가), `src/config/*`, `scheduler/`, `migrations/`
 - `.env`는 절대 커밋 금지 (키 추가 시 `.env.example`에 이름만 추가)
 - 수집 규칙: robots.txt 준수, 소스별 간격(`scrape_source.config.delay_ms`), 본문 저장 금지 소스는 `content = NULL`
