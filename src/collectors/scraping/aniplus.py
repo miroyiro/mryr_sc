@@ -3,6 +3,8 @@
 - target: target_type='sitemap', value='https://news.aniplustv.com/news-sitemap.xml'
 - 저장: 제목·발행일·URL만 (본문 저장 금지). /api/ 호출 금지 → sitemap 만 읽는다.
 - 증분: last_seen_external_id = 마지막으로 본 publication_date (ISO 문자열)
+- 2026-11-10 확인: 최근 6건 정도만 노출 (<loc>/news/1492</loc>, publication_date +09:00, title 엔티티 디코딩됨)
+  → 2시간 간격이면 놓치는 글 없음. robots: /api/ 만 Disallow
 - 성격: 사이트맵 = 'feed'에 가깝지만 소스(aniplus) 소유가 명주라 scraping/ 에 둠.
   동시방영(SPA, Playwright)과는 주기·라이브러리·메모리가 달라서 파일을 분리함.
 """
@@ -26,7 +28,7 @@ class AniplusNewsCollector(BaseScraper):
     store_content = False
     default_delay_ms = 3000
 
-    async def collect(self, target: ScrapeTarget | None) -> CollectResult:
+    async def collect(self, target: ScrapeTarget | None, params: dict | None = None) -> CollectResult:
         if target is None:
             raise ValueError("aniplus news 는 sitemap target 이 필요함")
         resp = await self.fetch(target.value)
