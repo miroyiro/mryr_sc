@@ -4,10 +4,10 @@
 DB는 `miroyiro_scrap` 스키마만 사용합니다 (main 스키마 접근 X).
 
 ## 기술 스택
-Python 3.10+ · FastAPI · SQLAlchemy(async) + asyncpg · Alembic · APScheduler · httpx · BeautifulSoup · RapidFuzz · PostgreSQL 16
+Python 3.11+ · FastAPI · SQLAlchemy(async) + asyncpg · Alembic · APScheduler · httpx · BeautifulSoup · RapidFuzz · PostgreSQL 16
 
 ## 준비물
-- Python 3.10 이상
+- Python 3.11 이상 (`enum.StrEnum` 사용, 로컬 venv 는 3.12)
 - Docker Desktop (Windows는 WSL Integration 켜기)
 
 ## 로컬 실행
@@ -32,6 +32,18 @@ uvicorn src.main:app --reload
 - 확인: http://localhost:8000/health → `{"status":"ok"}`
 - API 문서: http://localhost:8000/docs
 - DB 접속(DBeaver 등): `localhost:5433` / DB `miroyiro` / `dev` / `dev`
+
+## 테스트 · 실제 데이터 확인 (DB 없이)
+```bash
+pip install -r requirements-dev.txt
+pytest -q                                       # tests/fixtures = 2026-11-10 실제 응답 일부
+
+# 실제 사이트를 한 번 긁어서 raw_item 모양 + 파싱 결과 출력 (저장 안 함, robots·간격 그대로)
+python -m scripts.try_scrape animate --limit 3
+python -m scripts.try_scrape aniplus-news
+python -m scripts.try_scrape laftel --limit 5
+python -m scripts.try_scrape simulcast --season fall --year 2026   # playwright install chromium 필요
+```
 
 ## 마이그레이션 (Alembic)
 ```bash
