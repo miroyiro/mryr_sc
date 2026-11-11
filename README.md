@@ -3,6 +3,19 @@
 외부 소스(API·RSS·스크래핑)에서 공연/팝업/뉴스를 수집 → 가공·검수 → 승인분을 backend 내부 API로 반영합니다.
 DB는 `miroyiro_scrap` 스키마만 사용합니다 (main 스키마 접근 X).
 
+## 현재 상태 (2026-11-11)
+| 영역 | 내용 | 확인 |
+|---|---|---|
+| 파이프라인 골격 | 모델·리포지토리·서비스(수집→가공→게시)·내부 API·스케줄러 | pytest 17개 통과 |
+| 애니메이트 | 이벤트 게시판 목록 + 새 글 상세(개최장소), 10초 간격 | 실제 수집 ✅ |
+| 애니플러스 | 뉴스 sitemap / 동시방영 SPA (Playwright, 분기 체크박스) | 실제 수집 ✅ |
+| 라프텔 | items sitemap → 작품 페이지 og:title, laftel_id 커서 증분 | 실제 수집 ✅ (로톡 답변 전까지 OFF) |
+| 카탈로그 보강 | 라프텔·동시방영 → 이름 매칭 0.92 이상만 backend `/internal/catalog/streaming` | 단위 테스트 |
+| 담당 밖 (준현) | `collectors/api/*`, `collectors/feed/*` | 미구현 |
+
+- 미니PC 배포 전. 로컬(WSL)에서 `scripts/try_scrape.py` 로 검증
+- 개선 예정: 애니메이트 작품명에 붙는 행사명 정리, 라프텔 `- 영어` 같은 표기 분리
+
 ## 기술 스택
 Python 3.11+ · FastAPI · SQLAlchemy(async) + asyncpg · Alembic · APScheduler · httpx · BeautifulSoup · RapidFuzz · PostgreSQL 16
 
@@ -50,7 +63,7 @@ python -m scripts.try_scrape simulcast --season fall --year 2026   # playwright 
 alembic revision -m "설명"      # 빈 revision 생성 → upgrade()/downgrade() 에 SQL 직접 작성
 alembic upgrade head            # 적용
 alembic downgrade -1            # 한 단계 되돌리기
-alembic history                 # 0001 → 0002 → 0003 ...
+alembic history                 # 0001 → 0002 → 0003 → 0004
 ```
 - **revision은 한 사람(명주)이 순서대로** 만들기. 머지 전 `alembic heads`가 1개인지 확인
 - **`--autogenerate` 쓰지 않기**: 모델에 CHECK·인덱스를 다시 적지 않아서(진실의 원천 = 마이그레이션) autogenerate 가 인덱스를 지우는 revision 을 만듦
