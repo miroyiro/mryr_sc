@@ -5,6 +5,8 @@ sqlalchemy[asyncio]
 asyncpg
 alembic
 pydantic-settings
-apscheduler
+apscheduler<4        # 4.x 는 API가 완전히 달라서 3.x 고정
 beautifulsoup4
+lxml                 # bs4 파서 (html.parser 보다 빠르고 관대함)
 rapidfuzz
+playwright           # 애니플러스 동시방영(SPA)만. 설치 후 1회: playwright install --with-deps chromium
