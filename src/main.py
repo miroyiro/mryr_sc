@@ -21,7 +21,7 @@ from src.config.settings import settings
 logging.basicConfig(level=settings.LOG_LEVEL, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("miroyiro-scrap")
 
-INTERNAL_ROUTERS = [   # 경로는 api문서(노션) 기준
+INTERNAL_ROUTERS = [   # 경로는 api문서(노션) 기준                     # /internal/kopis/sync
     cache.router,                       # /internal/cache
     job.router,                         # /internal/pipeline/jobs
     job.stats_router,                   # /internal/pipeline/stats
