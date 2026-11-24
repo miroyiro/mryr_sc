@@ -1,19 +1,18 @@
+"""KOPIS 공연 컬렉터 (준현). 규약: KopisCollector(source, client=None) · collect(target, params) · aclose().
 
-import os
-import asyncio
+흐름: 31일 구간별 목록(afterdate 증분, shcate 장르) → 상세 → visit=Y(내한)만 → CollectedItem
+API 키: settings.KOPIS_API_KEY (SecretStr). URL 쿼리 service= 로 나가므로 실패 메시지는 base_api_collector 가 키 없이 만든다.
+DB 저장·이벤트 변환은 여기서 안 함 → collect_service(raw_item) · parsers/kopis_parser(event)
+"""
 import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta
 
-from datetime import date, datetime, timedelta
-
-import httpx
-
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, field_validator
-
-router = APIRouter(
-    prefix="/internal/kopis",
-    tags=["KOPIS"],
-)
+from src.collectors.base_api_collector import ApiError, BaseApiCollector
+from src.collectors.registry import CollectorNotImplemented
+from src.collectors.types import CollectedItem, CollectResult
+from src.config.settings import settings
+from src.models import ScrapeTarget
+from src.utils.time import KST
 
 BASE_URL = "http://www.kopis.or.kr/openApi/restful/pblprfr"
 
@@ -23,43 +22,48 @@ ROWS = 100
 PAST_DAYS = 30
 FUTURE_DAYS = 365
 
-# KOPIS 상세 조회 요청 간 대기 시간
-REQUEST_DELAY = 0.2
-
-class KopisSyncRequest(BaseModel):
-    afterdate: str = Field(
-        description="증분 수집 기준일 (YYYYMMDD)"
-    )
-    shcate: str | None = None
-
-    @field_validator("afterdate")
-    @classmethod
-    def validate_afterdate(cls, value):
-        try:
-            datetime.strptime(value, "%Y%m%d")
-        except ValueError:
-            raise ValueError(
-                "afterdate must be a valid YYYYMMDD date"
-            )
-
-        return value
+# params 없이(스케줄) 돌 때 기본값: 최근 7일 갱신분 · 대중음악만 (전 장르 전체면 상세 호출이 수천 번)
+DEFAULT_AFTERDATE_DAYS = 7
+DEFAULT_SHCATE = "CCCD"   # 대중음악 — 코드 확인 필요
 
 
-class KopisSyncResponse(BaseModel):
-    synced_count: int
-    new_ids: list[str]
+class KopisCollector(BaseApiCollector):
+    source_name = "kopis"
+    accept = "application/xml"
 
-class KopisCollector:
+    @property
+    def api_key(self) -> str:
+        if settings.KOPIS_API_KEY is None or not settings.KOPIS_API_KEY.get_secret_value():
+            raise ApiError("KOPIS_API_KEY not set")
+        return settings.KOPIS_API_KEY.get_secret_value()
 
-    def __init__(self, api_key: str):
-        self.api_key = api_key
+    async def collect(self, target: ScrapeTarget | None, params: dict | None = None) -> CollectResult:
+        """POST /internal/kopis/sync {afterdate?, shcate?} 또는 스케줄(params 없음)."""
+        params = params or {}
+        afterdate = params.get("afterdate") or (
+            datetime.now(KST).date() - timedelta(days=DEFAULT_AFTERDATE_DAYS)
+        ).strftime("%Y%m%d")
+        shcate = params.get("shcate") or DEFAULT_SHCATE
 
-        self.client = httpx.AsyncClient(
-            timeout=30.0,
-            headers={
-                "Accept": "application/xml",
-            },
-        )
+        # 날짜 구간 간 중복 공연 제거
+        performance_map: dict[str, dict] = {}
+        for period in get_search_periods():
+            for item in await self.fetch_all(stdate=period["stdate"], eddate=period["eddate"],
+                                             afterdate=afterdate, shcate=shcate):
+                if item.get("mt20id"):
+                    performance_map[item["mt20id"]] = item
+
+        details = []
+        for mt20id in performance_map:
+            detail = await self.fetch_detail(mt20id)
+            # 내한 공연만
+            if detail is not None and detail.get("visit") == "Y":
+                details.append(detail)
+
+        return CollectResult(items=[self.to_item(d) for d in details])
+
+    def to_item(self, detail: dict) -> CollectedItem:
+        raise CollectorNotImplemented("kopis to_item — (b) 단계에서 구현")
 
     async def fetch_list(
         self,
@@ -109,12 +113,10 @@ class KopisCollector:
         if shcate:
             params["shcate"] = shcate
 
-        response = await self.client.get(
+        response = await self.get(
             BASE_URL,
             params=params,
         )
-
-        response.raise_for_status()
 
         return self.parse_list(response.text)
 
@@ -152,14 +154,12 @@ class KopisCollector:
     async def fetch_detail(self, mt20id: str):
         """KOPIS 공연 상세 정보 조회."""
 
-        response = await self.client.get(
+        response = await self.get(
             f"{BASE_URL}/{mt20id}",
             params={
                 "service": self.api_key,
             },
         )
-
-        response.raise_for_status()
 
         return self.parse_detail(response.text)
 
@@ -229,13 +229,10 @@ class KopisCollector:
 
         return result
 
-    async def close(self):
-        await self.client.aclose()
-
 def get_search_periods():
     """KOPIS 조회 기간을 31일 단위로 분리."""
 
-    today = date.today()
+    today = datetime.now(KST).date()
 
     start_date = today - timedelta(days=PAST_DAYS)
     end_date = today + timedelta(days=FUTURE_DAYS)
@@ -259,180 +256,3 @@ def get_search_periods():
         current = period_end + timedelta(days=1)
 
     return periods
-
-def get_event_repository():
-    raise NotImplementedError(
-        "event repository를 연결해야 합니다."
-    )
-
-
-def get_artist_repository():
-    raise NotImplementedError(
-        "artist repository를 연결해야 합니다."
-    )
-
-
-def get_kopis_api_key():
-    api_key = os.getenv("KOPIS_API_KEY")
-
-    if not api_key:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="KOPIS API key is not configured",
-        )
-
-    return api_key
-
-async def sync_kopis(
-    afterdate: str,
-    shcate: str | None,
-    api_key: str,
-    event_repository,
-    artist_repository,
-):
-    """KOPIS 내한 공연 증분 동기화."""
-
-    collector = KopisCollector(api_key)
-
-    try:
-        periods = get_search_periods()
-
-        performance_map = {}
-
-        for period in periods:
-
-            items = await collector.fetch_all(
-                stdate=period["stdate"],
-                eddate=period["eddate"],
-                afterdate=afterdate,
-                shcate=shcate,
-            )
-
-            # 날짜 구간 간 중복 공연 제거
-            for item in items:
-                mt20id = item.get("mt20id")
-
-                if mt20id:
-                    performance_map[mt20id] = item
-
-        synced_count = 0
-        new_ids = []
-
-        for mt20id in performance_map:
-
-            detail = await collector.fetch_detail(mt20id)
-
-            if detail is None:
-                continue
-
-            # 내한 공연만 처리
-            if detail.get("visit") != "Y":
-                continue
-
-            cast = detail.get("cast")
-
-            artist_id = None
-
-            if cast:
-                artist = await artist_repository.find_kopis_artist(
-                    cast
-                )
-
-                if artist is not None:
-                    artist_id = artist["artist_id"]
-
-            event_data = {
-                "artist_id": artist_id,
-
-                "title": detail["title"],
-                "start_date": detail["start_date"],
-                "end_date": detail["end_date"],
-
-                "venue": detail["venue"],
-                "venue_id": detail["venue_id"],
-
-                "poster_url": detail["poster_url"],
-                "area": detail["area"],
-
-                "cast": cast,
-                "genre_name": detail["genre_name"],
-
-                "schedule": detail["schedule"],
-                "ticket_price": detail["ticket_price"],
-                "booking_sites": detail["booking_sites"],
-
-                "category": "jpop",
-                "type": "concert",
-
-                "source": "kopis",
-                "source_id": mt20id,
-
-                "is_international": True,
-            }
-
-            is_new = await event_repository.upsert_kopis_event(
-                event_data
-            )
-
-            synced_count += 1
-
-            if is_new:
-                new_ids.append(mt20id)
-
-            # API 요청 간 대기
-            await asyncio.sleep(REQUEST_DELAY)
-
-        return {
-            "synced_count": synced_count,
-            "new_ids": new_ids,
-        }
-
-    finally:
-        await collector.close()
-
-@router.post(
-    "/sync",
-    response_model=KopisSyncResponse,
-)
-async def sync_kopis_endpoint(
-    request: KopisSyncRequest,
-    api_key: str = Depends(get_kopis_api_key),
-    event_repository=Depends(get_event_repository),
-    artist_repository=Depends(get_artist_repository),
-):
-    """POST /internal/kopis/sync"""
-
-    try:
-        result = await sync_kopis(
-            afterdate=request.afterdate,
-            shcate=request.shcate,
-            api_key=api_key,
-            event_repository=event_repository,
-            artist_repository=artist_repository,
-        )
-
-        return result
-
-    except httpx.HTTPStatusError as error:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="KOPIS API returned an error",
-        )
-
-    except httpx.HTTPError:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="KOPIS API connection failed",
-        )
-
-    except ET.ParseError:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="KOPIS XML parsing failed",
-        )
-
-    except ValueError as error:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(error),
-        )

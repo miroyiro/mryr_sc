@@ -1,67 +1,31 @@
+"""애니시아 편성표 컬렉터 (준현). 규약: AnissiaCollector(source, client=None) · collect(target, params) · aclose().
 
-import re
-from datetime import date, datetime, time, timedelta
-from zoneinfo import ZoneInfo
+흐름: 주차(0~8)별 편성표 → 정규화(parse_item) → (작품 × 앞으로 14일 방영일) CollectedItem
+작품 매칭(anime_id)·이벤트 변환은 여기서 안 함 → process_service(name_matcher) · parsers/anissia_parser
+"""
+from datetime import date, datetime, timedelta
 
-import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, field_validator
-from rapidfuzz import fuzz
-
-router = APIRouter(
-    prefix="/internal/anissia",
-    tags=["Anissia"],
-)
+from src.collectors.base_api_collector import BaseApiCollector
+from src.collectors.registry import CollectorNotImplemented
+from src.collectors.types import CollectedItem, CollectResult
+from src.models import ScrapeTarget
+from src.utils.time import KST
 
 BASE_URL = "https://api.anissia.net/anime/schedule"
 
-KST = ZoneInfo("Asia/Seoul")
-
 SYNC_DAYS = 14
-MATCH_THRESHOLD = 85
-MATCH_SCORE_GAP = 5
-
-class AnissiaSyncRequest(BaseModel):
-    weeks: list[int] | None = None
-
-    @field_validator("weeks")
-    @classmethod
-    def validate_weeks(cls, value):
-        if value is None:
-            return value
-
-        if not value:
-            raise ValueError("weeks must not be empty")
-
-        if any(week not in range(9) for week in value):
-            raise ValueError("weeks must contain values from 0 to 8")
-
-        if len(value) != len(set(value)):
-            raise ValueError("weeks must not contain duplicates")
-
-        return value
 
 
-class UnmatchedAnime(BaseModel):
-    anime_no: int
-    subject: str
+class AnissiaCollector(BaseApiCollector):
+    source_name = "anissia"
 
+    async def collect(self, target: ScrapeTarget | None, params: dict | None = None) -> CollectResult:
+        """POST /internal/anissia/sync {weeks?} 또는 스케줄(params 없음 → 0~8 전체)."""
+        anime_list = await self.fetch_weeks((params or {}).get("weeks"))
+        return CollectResult(items=self.to_items(anime_list, datetime.now(KST).date()))
 
-class AnissiaSyncResponse(BaseModel):
-    synced_count: int
-    new_anime_nos: list[int]
-    broadcast_events_upserted: int
-    unmatched: list[UnmatchedAnime]
-
-class AnissiaCollector:
-
-    def __init__(self):
-        self.client = httpx.AsyncClient(
-            timeout=30.0,
-            headers={
-                "Accept": "application/json",
-            },
-        )
+    def to_items(self, anime_list: list[dict], today: date) -> list[CollectedItem]:
+        raise CollectorNotImplemented("anissia to_items — (b) 단계에서 구현")
 
     async def fetch_week(self, week: int):
         """애니시아 특정 주차 편성표 조회."""
@@ -69,11 +33,9 @@ class AnissiaCollector:
         if week not in range(9):
             raise ValueError("week must be between 0 and 8")
 
-        response = await self.client.get(
+        response = await self.get(
             f"{BASE_URL}/{week}"
         )
-
-        response.raise_for_status()
 
         return self.parse_items(
             response.json(),
@@ -147,94 +109,6 @@ class AnissiaCollector:
             "official_url": item.get("website"),
             "caption_count": item.get("captionCount"),
         }
-
-    async def close(self):
-        await self.client.aclose()
-
-def normalize_title(title: str | None):
-    """작품 제목 비교를 위한 문자열 정규화."""
-
-    if not title:
-        return ""
-
-    title = title.lower().strip()
-
-    # 공백과 특수문자 제거
-    return re.sub(r"[\W_]+", "", title)
-
-
-class AnissiaResolver:
-
-    def __init__(self, candidates: list[dict]):
-        # DB에서 한 번 조회한 후보 목록 재사용
-        self.candidates = candidates
-
-    def resolve(self, item: dict):
-        """애니시아 작품과 AniList 작품 매칭."""
-
-        source_titles = [
-            normalize_title(item.get("title_ko")),
-            normalize_title(item.get("original_title")),
-        ]
-
-        source_titles = [
-            title for title in source_titles if title
-        ]
-
-        if not source_titles:
-            return None
-
-        scores = []
-
-        for candidate in self.candidates:
-
-            candidate_titles = [
-                normalize_title(candidate.get("title_ko")),
-                normalize_title(candidate.get("title_romaji")),
-                normalize_title(candidate.get("title_english")),
-                normalize_title(candidate.get("title_native")),
-            ]
-
-            candidate_titles = [
-                title for title in candidate_titles if title
-            ]
-
-            if not candidate_titles:
-                continue
-
-            best_candidate_score = max(
-                fuzz.ratio(source_title, candidate_title)
-                for source_title in source_titles
-                for candidate_title in candidate_titles
-            )
-
-            scores.append(
-                (best_candidate_score, candidate)
-            )
-
-        if not scores:
-            return None
-
-        # 점수가 높은 후보부터 정렬
-        scores.sort(
-            key=lambda result: result[0],
-            reverse=True,
-        )
-
-        best_score, best_candidate = scores[0]
-
-        # 최소 유사도 미달이면 매칭하지 않음
-        if best_score < MATCH_THRESHOLD:
-            return None
-
-        # 1위와 2위 점수가 너무 비슷하면 오매칭 방지
-        if len(scores) > 1:
-            second_score = scores[1][0]
-
-            if best_score - second_score < MATCH_SCORE_GAP:
-                return None
-
-        return best_candidate
 
 def parse_date(value: str | None):
     """날짜 문자열을 date 객체로 변환."""
@@ -341,166 +215,3 @@ def get_broadcast_dates(
             result.append(special_date)
 
     return result
-
-def get_anime_repository():
-    raise NotImplementedError(
-        "anime repository를 연결해야 합니다."
-    )
-
-
-def get_event_repository():
-    raise NotImplementedError(
-        "event repository를 연결해야 합니다."
-    )
-
-async def sync_anissia(
-    weeks: list[int] | None,
-    anime_repository,
-    event_repository,
-):
-    """애니시아 방영 일정 동기화."""
-
-    collector = AnissiaCollector()
-
-    try:
-        # 1. 애니시아 편성표 수집
-        anime_list = await collector.fetch_weeks(weeks)
-
-        # 2. AniList 작품 후보를 DB에서 한 번만 조회
-        candidates = await (
-            anime_repository.find_resolution_candidates()
-        )
-
-        resolver = AnissiaResolver(candidates)
-
-        # 3. 동기화 결과 초기화
-        synced_count = 0
-        new_anime_nos = []
-        broadcast_events_upserted = 0
-        unmatched = []
-
-        today = datetime.now(KST).date()
-
-        # 같은 요청 내 중복 작품 처리 방지
-        processed_anime_nos = set()
-
-        # 4. 애니시아 작품 순회
-        for item in anime_list:
-
-            anime_no = item["anissia_no"]
-
-            if anime_no in processed_anime_nos:
-                continue
-
-            processed_anime_nos.add(anime_no)
-
-            # 5. AniList 작품 매칭
-            matched = resolver.resolve(item)
-
-            if matched is None:
-
-                unmatched.append({
-                    "anime_no": anime_no,
-                    "subject": item.get("title_ko") or "",
-                })
-
-                continue
-
-            anime_id = matched["anime_id"]
-
-            # 6. anime 테이블 업데이트
-            # 반환값:
-            # True  = anissia_no가 처음 연결된 작품
-            # False = 기존에 연결되어 있던 작품
-            is_new = await (
-                anime_repository.update_anissia_fields(
-                    anime_id=anime_id,
-                    title_ko=item.get("title_ko"),
-                    anissia_no=anime_no,
-                    broadcast_weekday=item.get("broadcast_weekday"),
-                    broadcast_time=parse_time(
-                        item.get("broadcast_time")
-                    ),
-                    official_url=item.get("official_url"),
-                )
-            )
-
-            synced_count += 1
-
-            if is_new:
-                new_anime_nos.append(anime_no)
-
-            # 7. 결방 작품은 이벤트 생성하지 않음
-            if item.get("status") != "ON":
-                continue
-
-            # 8. 향후 14일 방영 날짜 계산
-            broadcast_dates = get_broadcast_dates(
-                item,
-                today,
-            )
-
-            # 9. event 테이블 UPSERT
-            for broadcast_date in broadcast_dates:
-
-                source_id = (
-                    f"{anime_no}-"
-                    f"{broadcast_date.strftime('%Y%m%d')}"
-                )
-
-                event_data = {
-                    "anime_id": anime_id,
-                    "title": item.get("title_ko"),
-                    "event_date": broadcast_date,
-                    "type": "broadcast",
-                    "source": "anissia",
-                    "source_id": source_id,
-                }
-
-                await event_repository.upsert_broadcast_event(
-                    event_data
-                )
-
-                broadcast_events_upserted += 1
-
-        return {
-            "synced_count": synced_count,
-            "new_anime_nos": new_anime_nos,
-            "broadcast_events_upserted": broadcast_events_upserted,
-            "unmatched": unmatched,
-        }
-
-    finally:
-        await collector.close()
-
-@router.post(
-    "/sync",
-    response_model=AnissiaSyncResponse,
-)
-async def sync_anissia_endpoint(
-    request: AnissiaSyncRequest,
-    anime_repository=Depends(get_anime_repository),
-    event_repository=Depends(get_event_repository),
-):
-    """POST /internal/anissia/sync"""
-
-    try:
-        result = await sync_anissia(
-            weeks=request.weeks,
-            anime_repository=anime_repository,
-            event_repository=event_repository,
-        )
-
-        return result
-
-    except httpx.HTTPError:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Anissia API connection failed",
-        )
-
-    except ValueError as error:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(error),
-        )
