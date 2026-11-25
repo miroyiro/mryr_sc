@@ -5,13 +5,15 @@
 """
 from datetime import date, datetime, timedelta
 
-from src.collectors.base_api_collector import BaseApiCollector
-from src.collectors.registry import CollectorNotImplemented
+from src.collectors.base_api_collector import ApiError, BaseApiCollector
 from src.collectors.types import CollectedItem, CollectResult
 from src.models import ScrapeTarget
 from src.utils.time import KST
 
 BASE_URL = "https://api.anissia.net/anime/schedule"
+
+# 편성표 출처 페이지. 작품별 페이지 URL 형식은 확인 필요 (SPA 라 경로로 구분 안 됨)
+SOURCE_PAGE_URL = "https://anissia.net/"
 
 SYNC_DAYS = 14
 
@@ -25,7 +27,21 @@ class AnissiaCollector(BaseApiCollector):
         return CollectResult(items=self.to_items(anime_list, datetime.now(KST).date()))
 
     def to_items(self, anime_list: list[dict], today: date) -> list[CollectedItem]:
-        raise CollectorNotImplemented("anissia to_items — (b) 단계에서 구현")
+        """(작품 × 앞으로 14일 방영일) 하나 = raw_item 하나 = 방영 이벤트 하나.
+        결방(status != ON) 제외. 같은 작품이 여러 주차에 나와도 같은 날짜는 한 번만."""
+        items: dict[str, CollectedItem] = {}
+        for item in anime_list:
+            if item.get("status") != "ON":
+                continue
+            for broadcast_date in get_broadcast_dates(item, today):
+                external_id = f"{item['anissia_no']}-{broadcast_date:%Y%m%d}"
+                items.setdefault(external_id, CollectedItem(
+                    external_id=external_id,
+                    url=SOURCE_PAGE_URL,
+                    title=item.get("title_ko"),
+                    raw_data={**item, "broadcast_date": broadcast_date.isoformat()},
+                ))
+        return list(items.values())
 
     async def fetch_week(self, week: int):
         """애니시아 특정 주차 편성표 조회."""
@@ -37,8 +53,13 @@ class AnissiaCollector(BaseApiCollector):
             f"{BASE_URL}/{week}"
         )
 
+        # 응답은 {"code": "ok", "data": [...]} (2026-11-24 확인) — 리스트가 아님
+        body = response.json()
+        if not isinstance(body, dict) or body.get("code") != "ok":
+            raise ApiError(f"anissia week {week}: unexpected response")
+
         return self.parse_items(
-            response.json(),
+            body["data"],
             week,
         )
 

@@ -54,7 +54,7 @@ def test_retry_5xx_then_ok():
 
     def handler(req):
         calls.append(req.url.path)
-        return httpx.Response(503) if len(calls) == 1 else httpx.Response(200, json=[])
+        return httpx.Response(503) if len(calls) == 1 else httpx.Response(200, json={"code": "ok", "data": []})
 
     items = _run(AnissiaCollector, "anissia-t1", handler, lambda c: c.fetch_week(1))
     assert items == []

@@ -8,13 +8,14 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 
 from src.collectors.base_api_collector import ApiError, BaseApiCollector
-from src.collectors.registry import CollectorNotImplemented
 from src.collectors.types import CollectedItem, CollectResult
 from src.config.settings import settings
 from src.models import ScrapeTarget
 from src.utils.time import KST
 
 BASE_URL = "http://www.kopis.or.kr/openApi/restful/pblprfr"
+# 사람이 보는 공연 상세 페이지 (event.source_url) — 형식 확인 필요
+DETAIL_PAGE_URL = "https://www.kopis.or.kr/por/db/pblprfr/pblprfrView.do?menuId=MNU_00020&mt20Id={mt20id}"
 
 ROWS = 100
 
@@ -63,7 +64,14 @@ class KopisCollector(BaseApiCollector):
         return CollectResult(items=[self.to_item(d) for d in details])
 
     def to_item(self, detail: dict) -> CollectedItem:
-        raise CollectorNotImplemented("kopis to_item — (b) 단계에서 구현")
+        """상세 1건 → raw_item 1건. 포스터는 raw_data 에만 (images 저장 X). 날짜·장소 해석은 kopis_parser."""
+        return CollectedItem(
+            external_id=detail["mt20id"],
+            url=DETAIL_PAGE_URL.format(mt20id=detail["mt20id"]),
+            title=detail.get("title"),
+            published_at=_parse_updated(detail.get("updated_at")),
+            raw_data=detail,
+        )
 
     async def fetch_list(
         self,
@@ -256,3 +264,12 @@ def get_search_periods():
         current = period_end + timedelta(days=1)
 
     return periods
+
+
+def _parse_updated(value: str | None) -> datetime | None:
+    """updatedate '2026-11-24 15:00:03.04272'(소수 초 자릿수 일정치 않음, 2026-11-24 실제 응답) → KST datetime.
+    바뀌면 raw_item hash 가 달라져 재가공됨."""
+    try:
+        return datetime.fromisoformat(value.strip()).replace(tzinfo=KST) if value else None
+    except ValueError:
+        return None

@@ -13,8 +13,10 @@ from src.clients.backend_client import get_backend
 from src.config.database import SessionLocal
 from src.models.enums import ErrorJobType, ProcessJobStatus, TargetType
 from src.parsers.animate_parser import AnimateEventParser
+from src.parsers.anissia_parser import AnissiaParser
 from src.parsers.base_parser import BaseParser
 from src.parsers.event_parser import EventParser
+from src.parsers.kopis_parser import KopisParser
 from src.parsers.news_parser import NewsParser
 from src.parsers.name_matcher import CatalogName, NameMatcher
 from src.repositories import (
@@ -29,6 +31,8 @@ log = logging.getLogger(__name__)
 PARSERS: dict[str, BaseParser] = {
     "animate": AnimateEventParser(),   # raw_data(라벨·기간·장소) 구조화된 전용 파서
     "aniplus": NewsParser(),
+    "anissia": AnissiaParser(),        # 방영 (작품 × 방영일)
+    "kopis": KopisParser(),            # 내한 공연
     "umj": NewsParser(),
     "x": EventParser(main_category="anime"),   # TODO: 아티스트 계정이면 jpop — target.artist_id 로 구분
 }
@@ -105,7 +109,9 @@ async def run_process_for_scrape_job(scrape_job_id: int) -> int:
                         session, raw_item_id=raw.id, process_job_id=pjob.id, values=parsed.to_values()
                     )
                 pjob.processed_count += 1
-                if source.auto_publish:
+                # 자동 게시는 작품/아티스트가 매칭된 것만. 매칭 없으면 pending 으로 남겨 검수
+                # (안 그러면 main 에 작품 없는 방영·공연 이벤트가 대량으로 생김)
+                if source.auto_publish and (parsed.artist_id or parsed.anime_id):
                     to_publish.append(item_id)
             except Exception as exc:  # noqa: BLE001 — 한 건 실패가 전체를 막지 않게
                 pjob.failed_count += 1

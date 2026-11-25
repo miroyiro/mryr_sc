@@ -1,0 +1,50 @@
+{
+ "code": "ok",
+ "data": [
+  {
+   "week": "8",
+   "animeNo": 3534,
+   "status": "ON",
+   "time": "2026-12-31",
+   "subject": "마술의 극치에 도달해 여행을 떠난 전생 엘프, 주체할 수 없는 수명으로 살아있는 전설이 되다",
+   "originalSubject": "魔術を極めて旅に出た転生エルフ、持て余した寿命で生ける伝説となる",
+   "genres": "판타지",
+   "captionCount": 0,
+   "startDate": "2026-12-31",
+   "endDate": "",
+   "website": "https://tenseielf.asmik-ace.co.jp",
+   "x": "https://x.com/tenseielf",
+   "thumbnail": "https://file.anissia.net/file/wiki/571f3c39a8e41d2a94500eea683591be.thumb.avif"
+  },
+  {
+   "week": "8",
+   "animeNo": 2900,
+   "status": "ON",
+   "time": "2027-01-02",
+   "subject": "좀비가 넘치는 세상에서 나만 공격받지 않는다",
+   "originalSubject": "ゾンビのあふれた世界で俺だけが襲われない",
+   "genres": "액션,호러",
+   "captionCount": 0,
+   "startDate": "2027-01-02",
+   "endDate": "",
+   "website": "https://zom-ore.com",
+   "x": "https://x.com/zom_ore",
+   "thumbnail": "https://file.anissia.net/file/wiki/768d7a94ebdcb35fb71fd0b5d5bc52a9.thumb.avif"
+  },
+  {
+   "week": "8",
+   "animeNo": 3630,
+   "status": "ON",
+   "time": "2027-01-05",
+   "subject": "신 맛의 달인",
+   "originalSubject": "新 美味しんぼ",
+   "genres": "일상",
+   "captionCount": 0,
+   "startDate": "2027-01-05",
+   "endDate": "",
+   "website": "https://shin-oishinbo-anime.com",
+   "x": "https://x.com/oishinbo_ch",
+   "thumbnail": "https://file.anissia.net/file/wiki/1e8c7372acb1495ab7de05da9a636d2b.thumb.avif"
+  }
+ ]
+}
