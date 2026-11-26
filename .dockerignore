@@ -1,0 +1,30 @@
+# 비밀값
+.env
+.env.*
+
+# git / 로컬 환경
+.git
+.gitignore
+.gitattributes
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+.DS_Store
+**/.DS_Store
+
+# Claude / 작업용 임시 파일
+.claude
+CLAUDE*.md
+*.patch
+*.sh
+
+# 이미지에 필요 없는 것
+tests
+scripts
+docker-compose*.yml
+Dockerfile
+.dockerignore
+README.md
+requirements-dev.txt

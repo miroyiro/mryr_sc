@@ -1,0 +1,61 @@
+# 미니PC 배포용 (db + sc). 실행: docker compose up -d --build
+# 로컬 개발 DB 만 필요하면 docker-compose.dev.yml 사용.
+# .env 필수: POSTGRES_PASSWORD (영숫자만 — DATABASE_URL 에 그대로 들어감)
+name: mryr_sc
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: miroyiro
+      POSTGRES_USER: ${POSTGRES_USER:-scrap}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 를 .env 에 넣어야 함}
+      TZ: Asia/Seoul
+    command: postgres -c timezone=Asia/Seoul
+    volumes:
+      - sc_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    logging: *logging
+    # ports 없음: 호스트에 공개하지 않음 (sc 만 내부 네트워크로 접근)
+
+  sc:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      # env_file 보다 우선 → .env 에 개발용 값이 있어도 덮어씀
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-scrap}:${POSTGRES_PASSWORD}@db:5432/miroyiro
+      SCHEDULER_ENABLED: "true"      # 기본값 false → 반드시 켬
+      PLAYWRIGHT_ENABLED: "false"    # 이미지에 Chromium 없음
+      APP_ENV: ${APP_ENV:-prod}
+      TZ: Asia/Seoul
+    # exec → uvicorn 이 PID 1 이 돼서 SIGTERM 받고 lifespan 정리(스케줄러·DB 풀) 실행
+    # workers 1 고정: 스케줄러는 프로세스 1개에서만 (src/scheduler/scheduler.py)
+    command: ["sh", "-c", "alembic upgrade head && exec uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 1"]
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  sc_pg_data:
