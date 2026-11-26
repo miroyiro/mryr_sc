@@ -14,6 +14,8 @@ from src.api import (
     cache, health, job, pipeline_error, processed_item, raw_item, resolve, schedule, source, sync, target,
 )
 from src.admin import auth_router as admin_auth
+from src.admin import read_router as admin_read
+from src.admin import web as admin_web
 from src.api.deps import require_internal_key
 from src.clients.backend_client import close_backend
 from src.config.database import engine
@@ -67,6 +69,8 @@ app = FastAPI(
 app.include_router(health.router)
 # 관리 GUI: /admin/** 만. internal 키 대신 세션·CSRF·역할 (src/admin/deps.py). 공개 프록시는 /admin·/health 만 통과
 app.include_router(admin_auth.router)
+app.include_router(admin_read.router)
+admin_web.install(app)   # /admin 화면·보안 헤더·/admin 500 고정 JSON
 for r in INTERNAL_ROUTERS:
     app.include_router(r, dependencies=[Depends(require_internal_key)])
 

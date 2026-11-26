@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>miroyiro 수집 관리</title>
+  <link rel="stylesheet" href="/admin/static/app.css">
+  <!-- 인라인 스크립트·스타일 없음 (CSP default-src 'self') -->
+  <script src="/admin/static/app.js" defer></script>
+</head>
+<body>
+  <header class="top">
+    <h1>miroyiro 수집 현황</h1>
+    <nav id="nav" hidden>
+      <button type="button" data-view="dashboard">대시보드</button>
+      <button type="button" data-view="sources">소스</button>
+      <button type="button" data-view="targets">대상</button>
+    </nav>
+    <div class="who">
+      <span id="who-name"></span>
+      <button type="button" id="btn-login" hidden>로그인</button>
+      <button type="button" id="btn-logout" hidden>로그아웃</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- 상태 표시 (로딩·오류). 내용은 app.js 가 textContent 로만 넣음 -->
+    <p id="loading" class="state" hidden>불러오는 중…</p>
+    <div id="error" class="state error" hidden>
+      <p>데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요</p>
+      <button type="button" id="btn-retry">다시 시도</button>
+    </div>
+
+    <section id="view-login" hidden>
+      <h2>로그인</h2>
+      <form id="login-form" autocomplete="on">
+        <label>아이디 <input name="username" autocomplete="username" required maxlength="50"></label>
+        <label>비밀번호 <input name="password" type="password" autocomplete="current-password" required maxlength="256"></label>
+        <button type="submit">로그인</button>
+        <p id="login-msg" class="msg"></p>
+      </form>
+    </section>
+
+    <section id="view-dashboard" hidden>
+      <p id="dash-empty" class="state" hidden></p>
+      <p class="meta">가동 시작 시각: <span id="dash-started"></span></p>
+      <h2>소스별 수집 건수</h2>
+      <table><thead><tr><th>소스</th><th>건수</th></tr></thead><tbody id="dash-counts"></tbody></table>
+      <h2>최근 잡</h2>
+      <table>
+        <thead><tr><th>#</th><th>소스</th><th>상태</th><th>수집</th><th>중복</th><th>오류</th><th>시작</th><th>종료</th></tr></thead>
+        <tbody id="dash-jobs"></tbody>
+      </table>
+      <div id="dash-errors-wrap" hidden>
+        <h2>미해결 에러 유형별 건수</h2>
+        <table><thead><tr><th>유형</th><th>건수</th></tr></thead><tbody id="dash-errors"></tbody></table>
+      </div>
+    </section>
+
+    <section id="view-sources" hidden>
+      <h2>소스</h2>
+      <table>
+        <thead><tr><th>이름</th><th>타입</th><th>활성</th><th>마지막 잡</th><th class="auth-only">월 예산(USD)</th></tr></thead>
+        <tbody id="sources-body"></tbody>
+      </table>
+    </section>
+
+    <section id="view-targets" hidden>
+      <h2>수집 대상</h2>
+      <table>
+        <thead><tr><th>#</th><th>소스</th><th>타입</th><th>대상</th><th>상태</th><th class="auth-only">검증</th></tr></thead>
+        <tbody id="targets-body"></tbody>
+      </table>
+      <div class="pager">
+        <button type="button" id="btn-prev">이전</button>
+        <span id="page-info"></span>
+        <button type="button" id="btn-next">다음</button>
+      </div>
+      <div id="target-detail" class="detail" hidden>
+        <h3>대상 상세</h3>
+        <dl id="target-detail-list"></dl>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -5,10 +5,11 @@
 """
 from datetime import datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models import AdminSession, AdminUser
+from src.models import AdminSession, AdminUser, RawItem, ScrapeError, ScrapeJob, ScrapeSource, ScrapeTarget
+from src.schemas.common import PageParams
 
 
 class AdminStore:
@@ -56,3 +57,55 @@ class AdminStore:
     async def delete_session(self, token_hash: str) -> None:
         await self.db.execute(delete(AdminSession).where(AdminSession.token_hash == token_hash))
         await self.db.commit()
+
+    # --- 읽기 (b). 모델 객체를 돌려주고, 어떤 필드를 내보낼지는 read_router 의 스키마 변환이 정함 ---
+    async def first_job_at(self) -> datetime | None:
+        return await self.db.scalar(select(func.min(ScrapeJob.created_at)))
+
+    async def sources_with_last_status(self) -> list[tuple[ScrapeSource, str | None]]:
+        last_status = (
+            select(ScrapeJob.status).where(ScrapeJob.source_id == ScrapeSource.id)
+            .order_by(ScrapeJob.id.desc()).limit(1).scalar_subquery()
+        )
+        rows = await self.db.execute(select(ScrapeSource, last_status).order_by(ScrapeSource.name))
+        return [(r[0], r[1]) for r in rows]
+
+    async def collected_counts(self) -> list[tuple[str, int]]:
+        """소스별 raw_item 건수. 0건 소스도 나오게 LEFT JOIN."""
+        stmt = (
+            select(ScrapeSource.name, func.count(RawItem.id))
+            .outerjoin(RawItem, RawItem.source_id == ScrapeSource.id)
+            .group_by(ScrapeSource.name).order_by(ScrapeSource.name)
+        )
+        return [(r[0], int(r[1])) for r in await self.db.execute(stmt)]
+
+    async def recent_jobs(self, limit: int = 10) -> list[tuple[ScrapeJob, str]]:
+        stmt = (
+            select(ScrapeJob, ScrapeSource.name).join(ScrapeSource, ScrapeSource.id == ScrapeJob.source_id)
+            .order_by(ScrapeJob.id.desc()).limit(limit)
+        )
+        return [(r[0], r[1]) for r in await self.db.execute(stmt)]
+
+    async def error_type_counts(self) -> list[tuple[str, int]]:
+        """미해결 에러의 유형별 건수 (로그인 전용)."""
+        stmt = (
+            select(ScrapeError.type, func.count()).where(ScrapeError.status == "unresolved")
+            .group_by(ScrapeError.type).order_by(func.count().desc())
+        )
+        return [(r[0], int(r[1])) for r in await self.db.execute(stmt)]
+
+    async def targets(self, page: PageParams, source_id: int | None) -> tuple[list[tuple[ScrapeTarget, str]], int]:
+        base = select(ScrapeTarget, ScrapeSource.name).join(ScrapeSource, ScrapeSource.id == ScrapeTarget.source_id)
+        if source_id is not None:
+            base = base.where(ScrapeTarget.source_id == source_id)
+        total = await self.db.scalar(select(func.count()).select_from(base.subquery()))
+        rows = await self.db.execute(base.order_by(ScrapeTarget.id.desc()).offset(page.offset).limit(page.limit))
+        return [(r[0], r[1]) for r in rows], int(total or 0)
+
+    async def target(self, target_id: int) -> tuple[ScrapeTarget, str] | None:
+        stmt = (
+            select(ScrapeTarget, ScrapeSource.name).join(ScrapeSource, ScrapeSource.id == ScrapeTarget.source_id)
+            .where(ScrapeTarget.id == target_id)
+        )
+        row = (await self.db.execute(stmt)).first()
+        return (row[0], row[1]) if row else None
