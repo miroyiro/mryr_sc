@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     ANILIST_TTL_RELEASING_HOURS: int = 24
     ANILIST_TTL_FINISHED_DAYS: int = 30
 
+    # 관리 GUI (/admin)
+    PUBLIC_READ: bool = False        # true 면 비로그인도 GET(화이트리스트 응답)만 허용. 쓰기는 항상 로그인+CSRF+역할
+    COOKIE_SECURE: bool = False      # HTTPS(Tailscale Funnel) 뒤에서는 true → 쿠키가 http 로 안 나감
+    SESSION_TTL_HOURS: int = 12      # 로그인 세션 만료
+
     @property
     def is_prod(self) -> bool:
         return self.APP_ENV == "prod"

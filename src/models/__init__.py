@@ -1,4 +1,6 @@
 """모델 = 테이블 설계도. 테이블 1개 = 파일 1개 (03 규칙)."""
+from src.models.admin_session import AdminSession
+from src.models.admin_user import AdminUser
 from src.models.api_cache import ApiCache
 from src.models.base import Base
 from src.models.process_job import ProcessJob
@@ -13,4 +15,5 @@ from src.models.scrape_target import ScrapeTarget
 __all__ = [
     "Base", "ScrapeSource", "ScrapeTarget", "ScrapeSchedule", "ScrapeJob",
     "RawItem", "ProcessJob", "ProcessedItem", "ScrapeError", "ApiCache",
+    "AdminUser", "AdminSession",
 ]

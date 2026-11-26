@@ -20,3 +20,7 @@ class ScrapeTarget(IdMixin, TimestampMixin, Base):
     crawl_interval_sec: Mapped[int] = mapped_column(Integer, default=3600)
     last_crawled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_seen_external_id: Mapped[str | None] = mapped_column(String(100))
+    # 0005 (관리 GUI). verified_by = admin_user.id (main.users 아님)
+    admin_note: Mapped[str | None] = mapped_column(String(500))
+    verified_by: Mapped[int | None] = mapped_column(ForeignKey("admin_user.id", ondelete="SET NULL"))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
