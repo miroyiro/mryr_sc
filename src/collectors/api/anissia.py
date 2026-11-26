@@ -12,8 +12,8 @@ from src.utils.time import KST
 
 BASE_URL = "https://api.anissia.net/anime/schedule"
 
-# 편성표 출처 페이지. 작품별 페이지 URL 형식은 확인 필요 (SPA 라 경로로 구분 안 됨)
-SOURCE_PAGE_URL = "https://anissia.net/"
+# 작품 페이지 (event.source_url). animeNo 3463 = 바람의 저편 으로 사이트·API 대조 확정 (명주)
+ANIME_PAGE_URL = "https://anissia.net/anime/{anime_no}"
 
 SYNC_DAYS = 14
 
@@ -37,7 +37,7 @@ class AnissiaCollector(BaseApiCollector):
                 external_id = f"{item['anissia_no']}-{broadcast_date:%Y%m%d}"
                 items.setdefault(external_id, CollectedItem(
                     external_id=external_id,
-                    url=SOURCE_PAGE_URL,
+                    url=ANIME_PAGE_URL.format(anime_no=item["anissia_no"]),
                     title=item.get("title_ko"),
                     raw_data={**item, "broadcast_date": broadcast_date.isoformat()},
                 ))
@@ -53,9 +53,10 @@ class AnissiaCollector(BaseApiCollector):
             f"{BASE_URL}/{week}"
         )
 
-        # 응답은 {"code": "ok", "data": [...]} (2026-11-24 확인) — 리스트가 아님
+        # 실제 응답은 {"code": "ok", "data": [...]} (2026-11-24 확인). 공식 문서(2024-06)의 배열 단독 응답은 예전 형식
+        # → 그 밖의 모양이면 실패 (조용히 0건으로 넘기면 편성표가 비어 보이기만 하고 아무도 모름)
         body = response.json()
-        if not isinstance(body, dict) or body.get("code") != "ok":
+        if not isinstance(body, dict) or body.get("code") != "ok" or not isinstance(body.get("data"), list):
             raise ApiError(f"anissia week {week}: unexpected response")
 
         return self.parse_items(
@@ -129,6 +130,9 @@ class AnissiaCollector(BaseApiCollector):
             "end_date": item.get("endDate"),
             "official_url": item.get("website"),
             "caption_count": item.get("captionCount"),
+
+            # 작품 공식 X 주소 — 지금은 안 씀 (나중에 X 수집 대상 후보). thumbnail 은 저장 안 함 (이미지 규칙)
+            **({"x_url": item["x"]} if item.get("x") else {}),
         }
 
 def parse_date(value: str | None):

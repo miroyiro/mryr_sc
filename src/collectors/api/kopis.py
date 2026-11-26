@@ -14,8 +14,8 @@ from src.models import ScrapeTarget
 from src.utils.time import KST
 
 BASE_URL = "http://www.kopis.or.kr/openApi/restful/pblprfr"
-# 사람이 보는 공연 상세 페이지 (event.source_url) — 형식 확인 필요
-DETAIL_PAGE_URL = "https://www.kopis.or.kr/por/db/pblprfr/pblprfrView.do?menuId=MNU_00020&mt20Id={mt20id}"
+# 사람이 보는 공연 상세 페이지 (event.source_url). mt20Id 하나만 (검색 상태 파라미터 붙이지 않음, 명주 확정)
+DETAIL_PAGE_URL = "https://kopis.or.kr/por/db/pblprfr/pblprfrView.do?mt20Id={mt20id}"
 
 ROWS = 100
 

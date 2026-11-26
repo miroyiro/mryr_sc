@@ -30,6 +30,13 @@ def cast_names(cast: str | None) -> list[str]:
     return [n for n in names if n]
 
 
+def clean_venue(value: str | None) -> str | None:
+    """실제 응답 fcltynm 에 앞 공백·탭이 섞여 옴 (' 네이버 아레나 …\t (아레나)') → 공백 하나로. 원문은 raw_data 에 그대로."""
+    if not value:
+        return None
+    return " ".join(value.split()) or None   # 공백만 있던 값은 None
+
+
 class KopisParser(BaseParser):
     source_names = ("kopis",)
 
@@ -52,6 +59,6 @@ class KopisParser(BaseParser):
             event_data = build_event_data(
                 category=ProcessedCategory.CONCERT, main_category="jpop", title=title,
                 source=MainSource.KOPIS, source_id=raw.external_id, source_url=raw.url,
-                dates=dates, venue=rd.get("venue"),
+                dates=dates, venue=clean_venue(rd.get("venue")),
             )
         return ParsedItem(category=ProcessedCategory.CONCERT, title=title, keywords=keywords, event_data=event_data)

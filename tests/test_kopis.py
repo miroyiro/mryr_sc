@@ -51,7 +51,7 @@ def test_parse_kopis_date():
 def test_to_item():
     item = _collector().to_item(DETAIL)
     assert item.external_id == "PF999999"
-    assert item.url.endswith("mt20Id=PF999999")
+    assert item.url == "https://kopis.or.kr/por/db/pblprfr/pblprfrView.do?mt20Id=PF999999"
     assert item.published_at.isoformat() == "2026-11-20T10:00:00+09:00"
     assert item.content is None and item.images is None     # 포스터는 raw_data 에만
     assert item.raw_data["poster_url"].endswith("x.gif")
@@ -102,9 +102,32 @@ def test_real_detail_format(fixture_text):
     assert parsed.event_data["end_at"] == "2026-12-12T23:59:00+09:00"
 
 
+def test_real_visit_y_detail(fixture_text):
+    """실제 내한 공연 응답 (PF304185 요네즈 켄시): 공연장 공백·탭은 파서에서만 정리, raw_data 는 원문."""
+    detail = _collector().parse_detail(fixture_text("kopis_detail_PF304185.xml"))
+    assert detail["visit"] == "Y" and detail["cast"] == "요네즈 켄시"
+    assert "\t" in detail["venue"]                                   # 원문 유지
+    parsed = KopisParser().parse(_raw(_collector().to_item(detail)), source_name="kopis")
+    assert parsed.keywords == ["요네즈 켄시"]
+    ev = parsed.event_data
+    assert ev["venue"] == "네이버 아레나 앳 인스파이어(구. 인스파이어 엔터테인먼트 리조트) (아레나)"
+    assert ev["start_at"] == "2027-01-14T00:00:00+09:00" and ev["end_at"] == "2027-01-17T23:59:00+09:00"
+    assert ev["source_url"] == "https://kopis.or.kr/por/db/pblprfr/pblprfrView.do?mt20Id=PF304185"
+    assert "ticket_url" not in ev          # be 요청 형식 확인 전까지 raw_data(booking_sites)에만
+    assert detail["booking_sites"][0]["url"].startswith("http://ticket.interpark.com/")
+
+
+def test_real_blank_cast(fixture_text):
+    """PF302829: prfcast 가 공백 한 칸 → keywords 비어 있음 (매칭은 제목에만 의존)."""
+    detail = _collector().parse_detail(fixture_text("kopis_detail_PF302829.xml"))
+    assert detail["visit"] == "Y"
+    parsed = KopisParser().parse(_raw(_collector().to_item(detail)), source_name="kopis")
+    assert parsed.keywords == []
+    assert parsed.title == "NANAOAKARI, ALL EYES in Seoul"
+
+
 def test_collect_keeps_only_visit_y(fixture_text, monkeypatch):
-    """목록 → 상세 → visit=Y 만 남는지 (전 기간 구간을 돌므로 같은 공연은 한 번만).
-    실제 응답에 visit=Y 표본이 없어서(앞 60건 0개), visit_n 응답에서 <visit> 값만 Y 로 바꾼 사본을 씀."""
+    """목록 → 상세 → visit=Y 만 남는지 (전 기간 구간을 돌므로 같은 공연은 한 번만). 상세는 실제 응답 그대로."""
     _need("kopis_list.xml", "kopis_detail_visit_n.xml")
     monkeypatch.setattr(settings, "KOPIS_API_KEY", SecretStr("k"))
 
@@ -113,9 +136,7 @@ def test_collect_keeps_only_visit_y(fixture_text, monkeypatch):
     monkeypatch.setattr(base_api_collector, "_sleep", _no_sleep)
 
     list_xml = fixture_text("kopis_list.xml")
-    n = fixture_text("kopis_detail_visit_n.xml")
-    y = n.replace("<visit>N</visit>", "<visit>Y</visit>")
-    assert y != n
+    y, n = fixture_text("kopis_detail_PF304185.xml"), fixture_text("kopis_detail_visit_n.xml")
     first_id = _collector().parse_list(list_xml)[0]["mt20id"]
 
     def handler(req):
@@ -128,4 +149,4 @@ def test_collect_keeps_only_visit_y(fixture_text, monkeypatch):
             return await KopisCollector(_source(), client=client).collect(None, {"afterdate": "20261101"})
 
     result = asyncio.run(run())
-    assert [i.external_id for i in result.items] == [first_id]
+    assert [i.external_id for i in result.items] == ["PF304185"]

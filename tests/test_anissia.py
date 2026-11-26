@@ -44,6 +44,7 @@ def test_to_items_week1(fixture_text):
     first = items[0]
     assert first.external_id == "3463-20261130"
     assert first.title == "바람의 저편"
+    assert first.url == "https://anissia.net/anime/3463"
     assert first.raw_data["broadcast_date"] == "2026-11-30"
     assert first.content is None and first.images is None
 
@@ -100,3 +101,36 @@ def test_parser_special_date_all_day(fixture_text):
     ev = AnissiaParser().parse(_raw(item), source_name="anissia").event_data
     assert ev["start_at"] == "2026-12-31T00:00:00+09:00"
     assert ev["is_all_day"] is True            # 8주차는 시간 없음 → 종일
+
+
+@pytest.mark.parametrize("body", [
+    [{"animeNo": 1, "subject": "예전 형식"}],   # 공식 문서(2024-06)의 배열 단독 응답 = 예전 형식
+    {"code": "ok", "data": None},
+    {"code": "fail", "data": []},
+])
+def test_fetch_week_rejects_other_shapes(body):
+    async def run():
+        handler = lambda req: httpx.Response(200, json=body)   # noqa: E731
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await AnissiaCollector(_source(), client=client).fetch_week(1)
+
+    with pytest.raises(ApiError):
+        asyncio.run(run())
+
+
+def test_raw_data_fields(fixture_text):
+    """x 는 x_url 로 원문만, thumbnail·문자열 week 는 raw_data 에 안 남김."""
+    first = _collector().parse_items(_week(fixture_text, 1), 1)[0]
+    assert first["x_url"] == "https://x.com/kanatakara_anm"
+    assert "thumbnail" not in first and "x" not in first
+    assert first["week"] == 1                                   # 응답의 "1"(문자열) 이 아니라 요청한 주차(int)
+    no_x = _collector().parse_item({**_week(fixture_text, 1)[0], "x": ""}, 1)
+    assert "x_url" not in no_x
+
+
+def test_empty_start_end_date(fixture_text):
+    """startDate·endDate 가 "" 여도 기간 제한 없이 요일 계산 (실제 item 에서 값만 비운 사본)."""
+    item = {**_week(fixture_text, 1)[0], "startDate": "", "endDate": ""}
+    c = _collector()
+    items = c.to_items(c.parse_items([item], 1), today=date(2026, 11, 24))
+    assert [i.external_id for i in items] == ["3463-20261130", "3463-20261207"]
