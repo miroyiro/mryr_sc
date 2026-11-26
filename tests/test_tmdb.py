@@ -166,6 +166,7 @@ def test_missing_key_raises_before_request(monkeypatch, value):
     monkeypatch.setattr(settings, "TMDB_API_KEY", value)
     out, _, seen = _run(lambda req: httpx.Response(200, json={}), ONE)
     assert isinstance(out, RuntimeError) and seen == []
+    assert str(out) == "TMDB_API_KEY not set"           # 무엇이 빠졌는지 이름이 보이는 에러
 
 
 # ---------- 재시도 / 오류 ----------
@@ -263,3 +264,33 @@ def test_providers_with_null_fields_do_not_crash():
     params = {"items": [{"anime_id": 1, "title": "a", "tmdb_id": 5}]}
     out, _, _ = _run(lambda req: httpx.Response(200, json=detail), params)
     assert out.items[0].raw_data["streaming"] == [] and out.items[0].raw_data["other_providers"] == []
+
+
+# ---------- 로그에 키 없음 (INFO) ----------
+def _log_run(caplog, search_json, detail_json):
+    """성공 경로 + 503 재시도 경로를 INFO 로그를 켜고 실행 → 캡처된 로그 전문."""
+    import logging
+    caplog.set_level(logging.INFO)   # root INFO → httpx 로거(레벨 미지정)도 INFO 로 동작
+    ok = _ok_handler(search_json, detail_json)
+    calls = []
+
+    def handler(req):
+        calls.append(1)
+        return httpx.Response(503) if len(calls) == 1 else ok(req)
+
+    out, _, seen = _run(handler, ONE)
+    assert len(out.items) == 1 and len(seen) == 3
+    return caplog.text
+
+
+def test_v4_token_not_in_logs(monkeypatch, caplog, search_json, detail_json):
+    monkeypatch.setattr(settings, "TMDB_API_KEY", SecretStr(FAKE_V4))
+    text = _log_run(caplog, search_json, detail_json)
+    assert "retry" in text                   # 로그가 실제로 캡처됐는지 (빈 로그로 통과 방지)
+    assert FAKE_V4 not in text
+
+
+def test_v3_key_not_in_logs(caplog, search_json, detail_json):
+    text = _log_run(caplog, search_json, detail_json)
+    assert "retry" in text                   # base 재시도 경고가 캡처됨 = 로그 캡처 동작 중
+    assert FAKE_V3 not in text               # httpx 'HTTP Request: GET …?api_key=' 가 남으면 실패

@@ -108,6 +108,7 @@ def test_missing_token_raises_before_request(monkeypatch, value):
     monkeypatch.setattr(settings, "X_BEARER_TOKEN", value)
     out, seen = _run(lambda req: httpx.Response(200, json={}), _account(), **BUDGET)
     assert isinstance(out, RuntimeError) and seen == []
+    assert str(out) == "X_BEARER_TOKEN not set"         # 무엇이 빠졌는지 이름이 보이는 에러
 
 
 # ---------- 정상 흐름 ----------
@@ -222,3 +223,20 @@ def test_keyword_without_includes_uses_i_url():
     data = {"data": [{"id": "9", "text": "a", "author_id": "222"}], "meta": {"newest_id": "9"}}
     out, _ = _run(lambda req: httpx.Response(200, json=data), _keyword(), **BUDGET)
     assert out.items[0].url == "https://x.com/i/status/9" and out.items[0].author is None
+
+
+# ---------- 로그에 토큰 없음 (INFO) ----------
+def test_token_not_in_logs(caplog, tweets_json):
+    import logging
+    caplog.set_level(logging.INFO)
+    calls = []
+
+    def handler(req):
+        calls.append(1)
+        return httpx.Response(503) if len(calls) == 1 else httpx.Response(200, json=tweets_json)
+
+    out, seen = _run(handler, _account(), **BUDGET)
+    assert len(out.items) == 2 and len(seen) == 2
+    # httpx 요청 로그는 tmdb 모듈 import 여부(테스트 순서)에 따라 나오거나 안 나오므로 X 자체 로그로 캡처 확인
+    assert "retry" in caplog.text and "예상 비용" in caplog.text
+    assert FAKE_TOKEN not in caplog.text

@@ -20,6 +20,12 @@ from src.models import ScrapeTarget
 
 log = logging.getLogger(__name__)
 
+# 무엇: httpx 요청 로그(INFO, 전체 URL)를 WARNING 이상만 남기게 올린다. main.py 대신 여기서 (다른 브랜치와 충돌 회피).
+# 막는 것: v3 키가 쿼리(?api_key=…)로 나가 'HTTP Request: GET …api_key=<키>' 로그에 남는 것.
+# 주의: 프로세스 전역 설정 → 이 모듈이 import 된 뒤엔 다른 컬렉터의 httpx INFO 로그도 안 나온다.
+#       httpcore 는 DEBUG 에서만 로그하고 요청은 메서드만 찍어 별도 설정 안 함.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 API_BASE = "https://api.themoviedb.org/3"
 PAGE_URL = "https://www.themoviedb.org/tv/{id}"
 
