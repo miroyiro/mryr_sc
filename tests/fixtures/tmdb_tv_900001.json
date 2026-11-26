@@ -1,0 +1,11 @@
+{"id": 900001, "name": "장송의 프리렌", "original_name": "葬送のフリーレン",
+ "watch/providers": {"results": {
+   "KR": {"link": "https://www.themoviedb.org/tv/900001/watch?locale=KR",
+          "flatrate": [
+            {"provider_id": 8, "provider_name": "Netflix"},
+            {"provider_id": 99999, "provider_name": "Laftel"},
+            {"provider_id": 55555, "provider_name": "Disney Plus"},
+            {"provider_id": 8, "provider_name": "Netflix"}],
+          "rent": [{"provider_id": 3, "provider_name": "Google Play Movies"}],
+          "buy": [{"provider_id": 3, "provider_name": "Google Play Movies"}]},
+   "JP": {"flatrate": [{"provider_id": 84, "provider_name": "U-NEXT"}]}}}}

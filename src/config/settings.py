@@ -24,8 +24,8 @@ class Settings(BaseSettings):
 
     # 외부 API 키 (없어도 서버는 켜짐)
     KOPIS_API_KEY: SecretStr | None = None     # URL 쿼리(service=)로 나감 → 로그·에러에 남지 않게
-    TMDB_API_KEY: str | None = None
-    X_BEARER_TOKEN: str | None = None
+    TMDB_API_KEY: SecretStr | None = None
+    X_BEARER_TOKEN: SecretStr | None = None
 
     # 수집
     SCRAPER_USER_AGENT: str = "MiroyiroBot/0.1"

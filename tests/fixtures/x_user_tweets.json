@@ -1,0 +1,13 @@
+{"data": [
+  {"id": "1860000000000000002", "author_id": "111", "created_at": "2026-11-20T03:00:00.000Z", "lang": "ja",
+   "text": "【告知】ポップアップストア開催決定！\n詳細はこちら https://t.co/abc",
+   "entities": {"urls": [{"url": "https://t.co/abc", "expanded_url": "https://example.com/popup"}]},
+   "attachments": {"media_keys": ["3_1", "7_2"]},
+   "referenced_tweets": [{"type": "quoted", "id": "1850000000000000000"}]},
+  {"id": "1860000000000000001", "author_id": "111", "created_at": "2026-11-19T03:00:00.000Z", "lang": "ja",
+   "text": "短い本文…", "note_tweet": {"text": "長い本文 全文\n二行目"}}
+ ],
+ "includes": {"media": [{"media_key": "3_1", "type": "photo", "url": "https://pbs.twimg.com/media/a.jpg"},
+                        {"media_key": "7_2", "type": "video", "preview_image_url": "https://pbs.twimg.com/v.jpg"}],
+              "users": [{"id": "111", "username": "test_official"}]},
+ "meta": {"result_count": 2, "newest_id": "1860000000000000002", "oldest_id": "1860000000000000001"}}
