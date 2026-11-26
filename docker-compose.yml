@@ -1,4 +1,5 @@
-# 미니PC 배포용 (db + sc). 실행: docker compose up -d --build
+# 미니PC 배포용 (db + sc + proxy). 실행: docker compose up -d --build
+# 외부 공개(Tailscale Funnel)는 proxy(Caddy) 만 → /admin·/health 만 통과. sc:8000 은 직접 공개하지 않음
 # 로컬 개발 DB 만 필요하면 docker-compose.dev.yml 사용.
 # .env 필수: POSTGRES_PASSWORD (영숫자만 — DATABASE_URL 에 그대로 들어감)
 name: mryr_sc
@@ -47,6 +48,8 @@ services:
     # workers 1 고정: 스케줄러는 프로세스 1개에서만 (src/scheduler/scheduler.py)
     command: ["sh", "-c", "alembic upgrade head && exec uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 1"]
     ports:
+      # 기본 127.0.0.1 = 미니PC 안에서만. backend 가 /internal/* 를 부를 땐 BIND_ADDR=Tailscale IP(100.x).
+      # 0.0.0.0 금지: LAN 전체에 /internal·/docs 가 열림. 공개용 경로는 아래 proxy 가 따로 담당
       - "${BIND_ADDR:-127.0.0.1}:8000:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)"]
@@ -56,6 +59,20 @@ services:
       start_period: 30s
     restart: unless-stopped
     logging: *logging
+
+  proxy:
+    image: caddy:2-alpine   # 버전 미검증 (배포 시 docker compose pull 후 caddy version 확인)
+    depends_on:
+      - sc
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      # 127.0.0.1 에만 → Funnel(tailscale funnel ${PROXY_PORT})이 로컬로 받아 넘김. LAN 에는 안 열림
+      # 기본 8088: Spring 기본 포트 8080 과 겹치지 않게
+      - "127.0.0.1:${PROXY_PORT:-8088}:8080"
+    restart: unless-stopped
+    logging: *logging
+    # sc 에는 compose 내부 네트워크 이름(sc:8000)으로 붙음 → sc 의 호스트 바인딩과 무관
 
 volumes:
   sc_pg_data:
