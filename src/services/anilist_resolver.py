@@ -37,6 +37,7 @@ class AniListApi(Protocol):
     async def fetch_season_ids(self, season: str, season_year: int) -> list[dict[str, Any]]:
         """분기 작품의 {id, status} 목록만 (메타데이터 전체 X — bulk seed 금지)."""
         ...
+    async def aclose(self) -> None: ...
 
 
 def _get_api() -> AniListApi:
@@ -79,6 +80,13 @@ def to_anime_payload(media: dict[str, Any]) -> dict[str, Any]:
 
 async def resolve_titles(titles: list[str]) -> list[ResolveCandidate]:
     api = _get_api()
+    try:   # 예외가 나도 호출마다 만든 httpx 클라이언트를 닫음 (연결 누수 방지)
+        return await _resolve_titles(api, titles)
+    finally:
+        await api.aclose()
+
+
+async def _resolve_titles(api: AniListApi, titles: list[str]) -> list[ResolveCandidate]:
     out: list[ResolveCandidate] = []
     async with SessionLocal() as session:
         for title in titles:
@@ -115,7 +123,11 @@ async def refresh(anilist_ids: list[int], *, force: bool = False) -> int:
         stale = [i for i in anilist_ids if f"media:{i}" not in fresh]
         if not stale:
             return 0
-        medias = await _get_api().fetch_media_batch(stale)
+        api = _get_api()
+        try:   # 예외가 나도 클라이언트를 닫음
+            medias = await api.fetch_media_batch(stale)
+        finally:
+            await api.aclose()
         for mid, media in medias.items():
             await get_backend().upsert_anime(to_anime_payload(media))
             await cache_repository.put(session, SOURCE, f"media:{mid}", media, media_ttl(media))
@@ -128,7 +140,11 @@ async def sync_season(season: str, season_year: int) -> int:
     1) 분기 작품 id·status 만 조회 → RELEASING 만
     2) (TODO) backend /internal/catalog/names 로 팔로우된 작품 id 를 받아 합집합
     3) refresh() 가 TTL 지난 것만 alias 배치로 재조회 → backend upsert"""
-    medias = await _get_api().fetch_season_ids(season.upper(), season_year)
+    api = _get_api()
+    try:   # 예외가 나도 클라이언트를 닫음 (refresh 는 자기 클라이언트를 따로 만들고 닫음)
+        medias = await api.fetch_season_ids(season.upper(), season_year)
+    finally:
+        await api.aclose()
     releasing = [m["id"] for m in medias if (m.get("status") or "").upper() == "RELEASING"]
     return await refresh(releasing)
 

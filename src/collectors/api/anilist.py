@@ -1,16 +1,16 @@
+"""AniList GraphQL 클라이언트. 수집(registry)이 아니라 services/anilist_resolver.py 가 직접 쓴다.
 
+- aclose(): 자기가 만든 httpx 클라이언트만 닫는다 (넘겨받은 건 호출한 쪽 책임)
+- 429·5xx·연결 오류는 재시도 (Retry-After 존중), 4xx 는 바로 실패. 끝까지 429 면 AniListRateLimited
+- 응답 필드명(format·genres·description·synonyms 포함)·쿼리 복잡도 한도는 실응답으로 미검증 → .get() 으로 읽음
+"""
 import asyncio
 from datetime import datetime, timedelta, timezone
-from typing import Literal
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
 
-router = APIRouter(
-    prefix="/internal/anilist",
-    tags=["AniList"],
-)
+from src.collectors.scraping.base_scraper import _retry_after_sec
+from src.config.settings import settings
 
 BASE_URL = "https://graphql.anilist.co"
 
@@ -20,15 +20,24 @@ REQUEST_DELAY = 2
 SEASON_TTL = timedelta(days=1)
 FINISHED_TTL = timedelta(days=30)
 
-class AniListSyncRequest(BaseModel):
-    season: Literal["winter", "spring", "summer", "fall"]
-    season_year: int = Field(ge=1900, le=2100)
+_sleep = asyncio.sleep   # 테스트에서 바꿔 끼워 대기를 0으로
 
 
-class AniListSyncResponse(BaseModel):
-    synced_count: int
-    new_anilist_ids: list[int]
-    rate_limit_remaining: int | None
+class AniListError(Exception):
+    """AniList 호출 실패. status = HTTP 상태 (연결 오류·형식 오류면 None)."""
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+
+
+class AniListRateLimited(AniListError):
+    """429 가 재시도 끝까지 이어짐. retry_after = 응답 Retry-After 초 (없으면 60)."""
+
+    def __init__(self, retry_after: int):
+        super().__init__(f"anilist rate limited, retry after {retry_after}s", 429)
+        self.retry_after = retry_after
+
 
 class AniListCollector:
 
@@ -63,6 +72,10 @@ class AniListCollector:
         seasonYear
         episodes
         status
+        format
+        genres
+        description
+        synonyms
         coverImage {
             large
             extraLarge
@@ -104,8 +117,32 @@ class AniListCollector:
         }
     """
 
-    def __init__(self):
-        self.client = httpx.AsyncClient(
+    # 검색용: 리졸버(_score·to_anime_payload)가 읽는 필드만. staff·characters 는 빼서 쿼리 복잡도를 낮춤 (한도 미검증)
+    SEARCH_FIELDS = """
+        id
+        title { romaji english native }
+        synonyms
+        format
+        status
+        season
+        seasonYear
+        episodes
+        genres
+        description
+        coverImage { large extraLarge }
+        studios { nodes { id name } }
+    """
+
+    SEARCH_QUERY = (
+        "query ($search: String!, $perPage: Int!) {"
+        " Page(page: 1, perPage: $perPage) {"
+        " media(search: $search, type: ANIME, isAdult: false) {" + SEARCH_FIELDS + "} } }"
+    )
+
+    def __init__(self, client: httpx.AsyncClient | None = None):
+        # 넘겨받은 client 는 닫지 않는다 (테스트 MockTransport·공유 클라이언트용)
+        self._own_client = client is None
+        self.client = client or httpx.AsyncClient(
             timeout=30.0,
             headers={
                 "Content-Type": "application/json",
@@ -113,47 +150,100 @@ class AniListCollector:
             },
         )
 
+    async def aclose(self) -> None:
+        """자기가 만든 클라이언트만 닫음 → 호출마다 만든 연결이 새지 않게."""
+        if self._own_client:
+            await self.client.aclose()
+
     async def request(
         self,
         query: str,
         variables: dict | None = None,
     ):
-        """AniList GraphQL 요청 및 오류 처리."""
+        """AniList GraphQL 요청. 429·5xx·연결 오류는 재시도, 4xx·형식 오류는 바로 AniListError."""
 
-        response = await self.client.post(
-            BASE_URL,
-            json={
-                "query": query,
-                "variables": variables or {},
-            },
-        )
+        last: AniListError | None = None
+        for attempt in range(1, settings.HTTP_MAX_RETRIES + 1):
+            is_last = attempt == settings.HTTP_MAX_RETRIES
+            try:
+                response = await self.client.post(
+                    BASE_URL,
+                    json={
+                        "query": query,
+                        "variables": variables or {},
+                    },
+                )
+            except httpx.TransportError as exc:
+                last = AniListError(f"anilist POST → {type(exc).__name__}")
+                if not is_last:
+                    await _sleep(2 ** attempt)
+                continue
 
-        if response.status_code == 429:
-            retry_after = response.headers.get(
-                "Retry-After",
-                "60",
+            if response.status_code == 429:
+                retry_after = _retry_after_sec(response)
+                last = AniListRateLimited(int(retry_after) if retry_after is not None else 60)
+                if not is_last:
+                    await _sleep(retry_after or 2 ** attempt)
+                continue
+            if response.status_code >= 500:
+                last = AniListError(f"anilist POST → {response.status_code}", response.status_code)
+                if not is_last:
+                    await _sleep(_retry_after_sec(response) or 2 ** attempt)
+                continue
+            if response.status_code >= 400:
+                raise AniListError(f"anilist POST → {response.status_code}", response.status_code)
+
+            try:
+                body = response.json()
+            except ValueError:
+                raise AniListError("anilist: response is not JSON") from None
+
+            if isinstance(body, dict) and body.get("errors"):
+                raise AniListError(f"anilist graphql error: {body['errors']}")
+            # 빈 응답·형식 변경 → KeyError 대신 원인이 보이는 실패
+            data = body.get("data") if isinstance(body, dict) else None
+            if not isinstance(data, dict):
+                raise AniListError("anilist: response has no data")
+
+            remaining = response.headers.get(
+                "X-RateLimit-Remaining"
             )
 
-            raise RuntimeError(
-                f"ANILIST_RATE_LIMIT:{retry_after}"
+            return data, (
+                int(remaining) if remaining is not None and remaining.isdigit() else None
             )
 
-        response.raise_for_status()
+        assert last is not None
+        raise last
 
-        body = response.json()
+    async def search_media(self, title: str, *, per_page: int = 5) -> list[dict]:
+        """제목 검색 → AniList 원본 media 리스트 (리졸버가 점수 매김). 0건은 [] (정상)."""
+        data, _ = await self.request(self.SEARCH_QUERY, {"search": title, "perPage": per_page})
+        page = data.get("Page")
+        if not isinstance(page, dict):
+            raise AniListError("anilist search: response has no Page")
+        # id 없는 항목은 to_anime_payload(media["id"]) 에서 터지므로 버림
+        return [m for m in (page.get("media") or []) if isinstance(m, dict) and m.get("id")]
 
-        if body.get("errors"):
-            raise RuntimeError(
-                f"ANILIST_GRAPHQL_ERROR: {body['errors']}"
+    async def fetch_media_batch(self, anime_ids: list[int]) -> dict[int, dict]:
+        """여러 id 를 alias 로 BATCH_SIZE 씩 조회 → {id: 원본 media}. 없는 id(null alias)는 빠짐.
+        한 번에 수십 개를 보내 쿼리 복잡도 한도에 걸리는 걸 막으려고 나눔 (한도 수치 미검증).
+        없는 id 를 섞으면 AniList 가 null+200 인지 404 인지 미검증 — 404 면 그 배치 전체가 AniListError."""
+        out: dict[int, dict] = {}
+        for start in range(0, len(anime_ids), BATCH_SIZE):
+            if start:
+                await _sleep(REQUEST_DELAY)
+            batch = anime_ids[start:start + BATCH_SIZE]
+            aliases = "\n".join(
+                f"m{i}: Media(id: {int(anime_id)}, type: ANIME) {{ {self.DETAIL_FIELDS} }}"
+                for i, anime_id in enumerate(batch)
             )
-
-        remaining = response.headers.get(
-            "X-RateLimit-Remaining"
-        )
-
-        return body["data"], (
-            int(remaining) if remaining is not None else None
-        )
+            data, _ = await self.request("query { " + aliases + " }")
+            for i in range(len(batch)):
+                media = data.get(f"m{i}")
+                if isinstance(media, dict) and media.get("id"):
+                    out[media["id"]] = media
+        return out
 
     async def fetch_season_ids(
         self,
@@ -179,7 +269,7 @@ class AniListCollector:
 
             anime_list.extend(
                 {
-                    "anilist_id": item["id"],
+                    "id": item["id"],          # 리졸버 sync_season 이 m["id"] 로 읽음
                     "status": item["status"],
                 }
                 for item in page_data["media"]
@@ -287,8 +377,6 @@ class AniListCollector:
             ],
         }
 
-    async def close(self):
-        await self.client.aclose()
 
 def select_sync_targets(
     anime_list: list[dict],
@@ -350,138 +438,3 @@ def select_sync_targets(
             target_ids.append(anilist_id)
 
     return target_ids
-
-def get_anime_repository():
-    raise NotImplementedError(
-        "프로젝트의 anime repository를 연결해야 합니다."
-    )
-
-def get_anime_character_repository():
-    raise NotImplementedError(
-        "프로젝트의 anime_character repository를 연결해야 합니다."
-    )
-
-async def sync_anilist(
-    season: str,
-    season_year: int,
-    anime_repository,
-    anime_character_repository,
-):
-    """분기별 애니메이션 카탈로그 동기화."""
-
-    collector = AniListCollector()
-
-    try:
-        # 1. 분기별 작품 ID 및 상태 조회
-        anime_list = await collector.fetch_season_ids(
-            season,
-            season_year,
-        )
-
-        anilist_ids = [
-            item["anilist_id"]
-            for item in anime_list
-        ]
-
-        # 2. DB 기존 작품 정보 조회
-        existing_anime = (
-            await anime_repository.find_sync_candidates(
-                anilist_ids
-            )
-        )
-
-        # 3. 동기화 대상 선별
-        target_ids = select_sync_targets(
-            anime_list,
-            existing_anime,
-        )
-
-        # 4. 대상 작품 상세 수집
-        results = []
-        rate_limit_remaining = None
-
-        for index in range(0, len(target_ids), BATCH_SIZE):
-            batch = target_ids[index:index + BATCH_SIZE]
-
-            items, remaining = await collector.fetch_anime_batch(
-                batch
-            )
-
-            results.extend(items)
-
-            if remaining is not None:
-                rate_limit_remaining = remaining
-
-            if index + BATCH_SIZE < len(target_ids):
-                await asyncio.sleep(REQUEST_DELAY)
-
-        # 5. DB UPSERT
-        new_anilist_ids = []
-
-        for item in results:
-            anilist_id = item["anilist_id"]
-
-            is_new = await anime_repository.upsert_anime(
-                item
-            )
-
-            if is_new:
-                new_anilist_ids.append(anilist_id)
-
-            await anime_character_repository.upsert_characters(
-                anilist_id,
-                item["characters"],
-            )
-
-        # 6. 결과 반환
-        return {
-            "synced_count": len(results),
-            "new_anilist_ids": new_anilist_ids,
-            "rate_limit_remaining": rate_limit_remaining,
-        }
-
-    finally:
-        await collector.close()
-
-@router.post(
-    "/sync",
-    response_model=AniListSyncResponse,
-)
-async def sync_anilist_endpoint(
-    request: AniListSyncRequest,
-    anime_repository=Depends(get_anime_repository),
-    anime_character_repository=Depends(
-        get_anime_character_repository
-    ),
-):
-    """POST /internal/anilist/sync"""
-
-    try:
-        result = await sync_anilist(
-            season=request.season,
-            season_year=request.season_year,
-            anime_repository=anime_repository,
-            anime_character_repository=anime_character_repository,
-        )
-
-        return result
-
-    except RuntimeError as error:
-        message = str(error)
-
-        if message.startswith("ANILIST_RATE_LIMIT"):
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="AniList rate limit exceeded",
-            )
-
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="AniList GraphQL request failed",
-        )
-
-    except httpx.HTTPError:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="AniList API connection failed",
-        )

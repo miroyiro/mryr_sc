@@ -8,6 +8,7 @@ AniList 가 429/점검이면 503 + Retry-After
 """
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 
+from src.collectors.api.anilist import AniListRateLimited
 from src.schemas.common import DataResponse
 from src.schemas.resolve import AnimeRefreshRequest, AnimeResolveRequest, ResolveCandidate
 from src.schemas.sync import SeasonSyncRequest
@@ -31,7 +32,9 @@ async def resolve(body: AnimeResolveRequest):
         return DataResponse(data=await anilist_resolver.resolve_titles(body.titles))
     except ImportError as exc:  # 준현 anilist 컬렉터 아직 없음
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "anilist collector not ready") from exc
-    # TODO: 컬렉터가 RateLimited 예외를 정의하면 → 503 + headers={"Retry-After": ...}
+    except AniListRateLimited as exc:  # AniList 429 가 재시도 끝까지 → backend 가 언제 다시 부를지 알게 503 + Retry-After
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "anilist rate limited",
+                            headers={"Retry-After": str(exc.retry_after)}) from exc
 
 
 @router.post("/refresh", status_code=status.HTTP_202_ACCEPTED)
