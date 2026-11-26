@@ -25,6 +25,9 @@ RUN useradd --system --uid 10001 --home-dir /app --shell /usr/sbin/nologin app
 COPY --chown=app:app alembic.ini ./
 COPY --chown=app:app migrations ./migrations
 COPY --chown=app:app src ./src
+# 관리 GUI 계정 CLI 한 파일만 (scripts/ 의 나머지는 외부 사이트를 긁는 개발용이라 제외).
+# __init__.py 없이도 python -m scripts.create_admin 동작 (namespace package, WORKDIR=/app)
+COPY --chown=app:app scripts/create_admin.py ./scripts/create_admin.py
 
 USER app
 

@@ -22,7 +22,9 @@ CLAUDE*.md
 
 # 이미지에 필요 없는 것
 tests
-scripts
+# scripts 는 create_admin.py 만 이미지에 (Dockerfile COPY 와 짝)
+scripts/*
+!scripts/create_admin.py
 docker-compose*.yml
 Dockerfile
 .dockerignore

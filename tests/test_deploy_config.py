@@ -41,3 +41,12 @@ def test_env_example_defaults_safe():
     assert "PUBLIC_READ=false" in lines
     for key in ("COOKIE_SECURE=", "SESSION_TTL_HOURS=", "PROXY_PORT="):
         assert any(ln.startswith(key) for ln in lines)
+
+
+def test_admin_cli_is_in_image_but_other_scripts_are_not():
+    """docker compose exec sc python -m scripts.create_admin 이 되려면 COPY 와 .dockerignore 예외가 짝이어야 함."""
+    dockerfile = _code_lines((ROOT / "Dockerfile").read_text(encoding="utf-8"))
+    ignore = _code_lines((ROOT / ".dockerignore").read_text(encoding="utf-8"))
+    assert "COPY --chown=app:app scripts/create_admin.py ./scripts/create_admin.py" in dockerfile
+    assert not any(ln.startswith("COPY") and ln.split()[-2] in ("scripts", "scripts/") for ln in dockerfile)
+    assert ignore.index("scripts/*") < ignore.index("!scripts/create_admin.py")   # 뒤의 ! 가 이김
