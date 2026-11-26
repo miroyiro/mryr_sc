@@ -71,6 +71,7 @@ class FakeReadStore(FakeStore):
         super().__init__()
         self.fail = fail
         x, animate = _source(1, "x"), _source(2, "animate")
+        self.source_by_id = {1: x, 2: animate}
         self.sources = [] if empty else [(animate, "completed"), (x, "failed")]
         self.counts = [] if empty else [("animate", 12), ("x", 0)]
         self.jobs = [] if empty else [(_job(10, 1), "x")]
@@ -112,3 +113,15 @@ class FakeReadStore(FakeStore):
     async def target(self, target_id):
         self._check()
         return next((r for r in self.target_rows if r[0].id == target_id), None)
+
+    # --- 쓰기 (c) ---
+    async def target_with_source(self, target_id):
+        self._check()
+        row = next((r for r in self.target_rows if r[0].id == target_id), None)
+        return (row[0], self.source_by_id[row[0].source_id]) if row else None
+
+    async def set_note(self, target, note):
+        target.admin_note = note
+
+    async def mark_verified(self, target, *, user_id, at):
+        target.is_verified, target.verified_by, target.verified_at = True, user_id, at

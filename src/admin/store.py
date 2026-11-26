@@ -102,6 +102,26 @@ class AdminStore:
         rows = await self.db.execute(base.order_by(ScrapeTarget.id.desc()).offset(page.offset).limit(page.limit))
         return [(r[0], r[1]) for r in rows], int(total or 0)
 
+    # --- 쓰기 (c). 메모·verify 만 ---
+    async def target_with_source(self, target_id: int) -> tuple[ScrapeTarget, ScrapeSource] | None:
+        """verify 는 소스 config(monthly_budget_usd)까지 봐야 해서 소스 객체를 같이 돌려줌."""
+        stmt = (
+            select(ScrapeTarget, ScrapeSource).join(ScrapeSource, ScrapeSource.id == ScrapeTarget.source_id)
+            .where(ScrapeTarget.id == target_id)
+        )
+        row = (await self.db.execute(stmt)).first()
+        return (row[0], row[1]) if row else None
+
+    async def set_note(self, target: ScrapeTarget, note: str | None) -> None:
+        target.admin_note = note
+        await self.db.commit()
+
+    async def mark_verified(self, target: ScrapeTarget, *, user_id: int, at: datetime) -> None:
+        target.is_verified = True
+        target.verified_by = user_id
+        target.verified_at = at
+        await self.db.commit()
+
     async def target(self, target_id: int) -> tuple[ScrapeTarget, str] | None:
         stmt = (
             select(ScrapeTarget, ScrapeSource.name).join(ScrapeSource, ScrapeSource.id == ScrapeTarget.source_id)

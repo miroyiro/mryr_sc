@@ -27,3 +27,7 @@ form input { font: inherit; padding: 4px 6px; margin-left: 6px; }
 .detail dd { margin: 0; word-break: break-all; }
 body:not(.authed) .auth-only { display: none; }
 [hidden] { display: none !important; }
+.edit { margin-top: 12px; display: grid; gap: 6px; }
+.edit textarea { font: inherit; width: 100%; padding: 6px; }
+.edit-actions { display: flex; gap: 8px; }
+.msg.ok { color: #1b6e3a; }

@@ -79,6 +79,16 @@
       <div id="target-detail" class="detail" hidden>
         <h3>대상 상세</h3>
         <dl id="target-detail-list"></dl>
+        <!-- 로그인 사용자만 보임. 숨김은 편의일 뿐, 권한은 서버가 매번 검사 -->
+        <div id="target-edit" class="edit" hidden>
+          <label for="note-input">메모 (500자)</label>
+          <textarea id="note-input" maxlength="500" rows="3"></textarea>
+          <div class="edit-actions">
+            <button type="button" id="btn-note-save">메모 저장</button>
+            <button type="button" id="btn-verify" hidden>X 대상 검증 (admin)</button>
+          </div>
+          <p id="edit-msg" class="msg"></p>
+        </div>
       </div>
     </section>
   </main>

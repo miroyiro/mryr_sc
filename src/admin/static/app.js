@@ -157,8 +157,48 @@ async function openTarget(id) {
     }
     $("target-detail-list").replaceChildren(...items);
     $("target-detail").hidden = false;
+    renderEdit(data);
   } catch (e) {
     handleFailure(e, () => openTarget(id));
+  }
+}
+
+// --- 쓰기 (메모·verify). 버튼 숨김은 편의일 뿐, 권한은 서버가 매번 검사 ---
+function renderEdit(t) {
+  state.targetId = t.id;
+  $("target-edit").hidden = !authed();
+  if (!authed()) return;
+  $("note-input").value = t.admin_note || "";     // value 는 텍스트로만 들어감 (HTML 해석 X)
+  $("btn-verify").hidden = !(state.me.role === "admin" && t.target_type === "x_account" && !t.is_verified);
+  setEditMsg("");
+}
+
+function setEditMsg(text, ok) {
+  $("edit-msg").textContent = text;
+  $("edit-msg").classList.toggle("ok", !!ok);
+}
+
+const WRITE_ERRORS = {
+  400: "이 대상은 여기서 검증할 수 없습니다 (X 계정만)",
+  403: "권한이 없거나 세션이 바뀌었습니다. 새로고침 후 다시 시도해 주세요",
+  404: "대상을 찾을 수 없습니다",
+  409: "이 소스의 월 예산(monthly_budget_usd)이 설정되지 않아 검증할 수 없습니다",
+  422: "입력값을 확인해 주세요 (메모는 500자까지)",
+};
+
+async function write(path, options, doneText) {
+  const id = state.targetId;
+  try {
+    const { status } = await api(path, options);
+    if (status === 200) {
+      await openTarget(id);          // 서버가 저장한 값으로 다시 그림
+      setEditMsg(doneText, true);
+    } else {
+      setEditMsg(WRITE_ERRORS[status] || "저장하지 못했습니다. 잠시 후 다시 시도해 주세요");
+    }
+  } catch (e) {
+    if (e instanceof AuthError) return handleFailure(e);
+    setEditMsg("저장하지 못했습니다. 잠시 후 다시 시도해 주세요");   // 5xx·네트워크: 고정 문구만
   }
 }
 
@@ -206,6 +246,15 @@ document.addEventListener("DOMContentLoaded", () => {
   $("btn-login").addEventListener("click", () => showLogin());
   $("btn-prev").addEventListener("click", () => { state.page -= 1; go("targets"); });
   $("btn-next").addEventListener("click", () => { state.page += 1; go("targets"); });
+
+  $("btn-note-save").addEventListener("click", () =>
+    write("/targets/" + encodeURIComponent(state.targetId) + "/note",
+      { method: "PATCH", body: { admin_note: $("note-input").value } }, "메모를 저장했습니다"));
+
+  $("btn-verify").addEventListener("click", () => {
+    if (!window.confirm("이 X 계정을 검증하면 수집이 시작됩니다(유료 API). 진행할까요?")) return;
+    write("/targets/" + encodeURIComponent(state.targetId) + "/verify", { method: "POST" }, "검증했습니다");
+  });
 
   $("btn-logout").addEventListener("click", async () => {
     try { await api("/logout", { method: "POST" }); } catch (_) { /* 실패해도 화면은 초기화 */ }
